@@ -53,8 +53,23 @@ client.on('interactionCreate', handleInteraction);
 client.once('ready', async () => {
   console.log(`Discord connected as ${client.user.tag}`);
 
-  await client.application.commands.set([gitwatcherCommand]);
-  console.log('Global /gitwatcher command registered.');
+  console.log(
+    'Registering /gitwatcher subcommands:',
+    gitwatcherCommand.options.map((option) => option.name),
+  );
+
+  const commands = await client.application.commands.set([
+    gitwatcherCommand,
+  ]);
+
+  console.log(
+    'Registered Discord commands:',
+    commands.map((command) => ({
+      name: command.name,
+      id: command.id,
+      options: command.options.map((option) => option.name),
+    })),
+  );
 
   startWatcher(client);
   console.log('GitHub watcher started.');
