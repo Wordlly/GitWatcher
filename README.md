@@ -1,205 +1,80 @@
-\
-# GitWatcher V1
+# GitWatcher
 
-A small Discord + GitHub ticket bot for a private development server.
+GitWatcher watches GitHub and helps track tasks in Discord.
 
-## V1 features
+## Setup
 
-- Watches one GitHub repository.
-- Only processes pushes to `main` (or `WATCHED_BRANCH`).
-- `/gitwatcher assign @user "Task title"`
-- `/gitwatcher ffa "Task title" slots`
-- Ticket acceptance with Discord buttons.
-- Discord ↔ GitHub username linking.
-- Commit-to-ticket matching:
-  1. Ticket code such as `GW-0001` anywhere in the first commit-message line.
-  2. Exact ticket title, case-insensitive.
-- Commit author must be an accepted ticket assignee.
-- Automatically marks the original Discord ticket as completed.
-- Only accepted assignees can press **Sign Off**.
-- FFA tickets close only after every accepted assignee signs off.
-- `/gitwatcher transfer GW-0001 @newuser`
-- Optional Git log channel.
-- SQLite database.
-- GitHub webhook signature verification.
-- Docker deployment.
+### 1. Put this project on GitHub
 
-## Recommended workflow
+Upload all these files to your GitHub repo.
 
-1. Admin creates:
-   `/gitwatcher assign @john description:Setup development notes`
+Do **not** upload your real `.env` file.
 
-2. John presses **Accept Ticket**.
+### 2. Make a Railway project
 
-3. John links Discord to GitHub once:
-   `/gitwatcher link github_username:johnsmith`
+In Railway:
 
-4. John works normally.
+1. Create a new project
+2. Pick **Deploy from GitHub repo**
+3. Select your GitWatcher repo
+4. Add **PostgreSQL**
 
-5. A commit eventually reaches `main`:
-   `git commit -m "GW-0001 Setup development notes"`
-
-6. GitHub sends a signed push webhook.
-
-7. GitWatcher verifies:
-   - correct repository;
-   - `refs/heads/main`;
-   - ticket is in progress;
-   - commit message matches;
-   - GitHub identity belongs to an accepted assignee.
-
-8. Discord ticket changes to **Task has been completed**.
-
-9. Assignee presses **Sign Off**.
-
-10. Ticket changes to **Ticket has been closed**.
-
-## Local setup
-
-### 1. Create Discord application
-
-In the Discord Developer Portal:
-
-- Create an application.
-- Create a bot.
-- Copy the bot token.
-- Invite it with:
-  - `bot`
-  - `applications.commands`
-- Recommended bot permissions:
-  - View Channels
-  - Send Messages
-  - Embed Links
-  - Read Message History
-
-V1 does not require the bot to manage Discord roles.
-
-### 2. Environment
-
-Copy:
-
-```bash
-cp .env.example .env
-```
-
-Fill in:
-
-```env
-DISCORD_TOKEN=...
-DISCORD_GUILD_ID=...
-GITHUB_WEBHOOK_SECRET=...
-WATCHED_REPO=owner/WLPT
-WATCHED_BRANCH=main
-LOG_CHANNEL_ID=...
-DATABASE_PATH=/data/gitwatcher.db
-PORT=8080
-```
-
-Generate a strong webhook secret, for example:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
-
-### 3. Run with Docker
-
-```bash
-docker compose up --build
-```
-
-Health check:
+### 3. Add these Railway variables
 
 ```text
-GET http://localhost:8080/health
+DISCORD_TOKEN=your_discord_bot_token
+DISCORD_GUILD_ID=your_discord_server_id
+DATABASE_URL=${{Postgres.DATABASE_URL}}
 ```
 
-## GitHub webhook
-
-Repository:
-
-`Settings → Webhooks → Add webhook`
-
-Payload URL:
+For private GitHub repos, also add:
 
 ```text
-https://YOUR_PUBLIC_HOST/github/webhook
+GITHUB_TOKEN=your_github_token
 ```
 
-Content type:
+### 4. Invite the bot to Discord
+
+Give it permission to:
 
 ```text
-application/json
+View Channels
+Send Messages
+Embed Links
+Read Message History
+Use Application Commands
 ```
 
-Secret:
+### 5. Use the bot
 
-Use the exact value of `GITHUB_WEBHOOK_SECRET`.
-
-Events:
+In Discord, type:
 
 ```text
-Just the push event
+/gitwatcher help
 ```
 
-Enable SSL verification.
+That tells you how to use everything.
 
-## AWS V1 recommendation
-
-For SQLite, use **one small EC2 instance with Docker** rather than a horizontally
-scaling service. The SQLite file lives in the Docker volume and persists on the
-instance's EBS storage.
-
-Basic shape:
+Example:
 
 ```text
-Internet
-   |
- HTTPS :443
-   |
- reverse proxy / TLS
-   |
- GitWatcher container :8080
-   |             |
- Discord        SQLite volume
- gateway        /data/gitwatcher.db
-   |
- GitHub webhook
+/gitwatcher watch https://github.com/owner/repo
 ```
 
-A very small private server does not need Redis, RDS, ECS, Kubernetes, SQS, or
-multiple workers.
+Then:
 
-When GitWatcher grows, replace SQLite with Postgres and deploy a stateless bot/API
-architecture.
+```text
+/gitwatcher assign @john "Setup development notes"
+```
 
-## Exposing the webhook
+## Done
 
-GitHub needs an HTTPS URL. On EC2, put HTTPS in front of port 8080 using a reverse
-proxy such as Caddy or nginx plus a domain name.
+If the bot is online in Discord, you are ready.
 
-For local-only testing, use a temporary HTTPS tunnel and point GitHub's webhook at
-that tunnel URL.
+Use:
 
-## Notes / V1 limitations
+```text
+/gitwatcher help
+```
 
-- One configured repository per bot process.
-- One configured branch.
-- GitHub identity is manually linked by username.
-- If `commit.author.username` is unavailable, V1 falls back to the GitHub webhook
-  sender. This is convenient but not sufficiently strict for a large/public bot.
-- Commit matching only checks the first line of each pushed commit message.
-- Merge/squash strategies can alter commit messages. Using `GW-####` in the merge
-  commit or squash title is recommended.
-- No GitHub OAuth yet.
-- No GitHub App installation flow yet.
-- No web dashboard yet.
-- No ticket-role creation yet. Database permissions are authoritative in V1.
-
-## Why ticket roles are not in V1
-
-A role per ticket is useful visually, but it is not needed for security. The bot
-already knows exactly which Discord IDs accepted each ticket. This avoids role
-clutter and keeps the first version much safer.
-
-A later `/gitwatcher roles enable` option can mirror assignees into temporary
-Discord roles while keeping the database as the source of truth.
+for everything else.

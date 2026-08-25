@@ -1,33 +1,22 @@
-\
+
 import asyncio
-
 import uvicorn
-
 from .bot import bot
 from .config import settings
-from .webhook import app, install_routes
-
+from .db import close_pool
+from .webhook import app
 
 async def run_web():
-    config = uvicorn.Config(
-        app,
-        host="0.0.0.0",
-        port=settings.port,
-        log_level="info",
-    )
-    server = uvicorn.Server(config)
+    server = uvicorn.Server(uvicorn.Config(
+        app, host="0.0.0.0", port=settings.port, log_level="info"))
     await server.serve()
 
-
 async def main():
-    install_routes(bot)
-
-    async with bot:
-        await asyncio.gather(
-            bot.start(settings.discord_token),
-            run_web(),
-        )
-
+    try:
+        async with bot:
+            await asyncio.gather(bot.start(settings.discord_token), run_web())
+    finally:
+        close_pool()
 
 if __name__ == "__main__":
     asyncio.run(main())
