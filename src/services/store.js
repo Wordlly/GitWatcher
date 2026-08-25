@@ -647,7 +647,29 @@ export async function addBranchLog({
     [guildId, channelId, owner, repo, branch, lastSeenSha, createdBy],
   );
 
-  return rows[0];
+  const saved = rows[0];
+
+  await pool.query(
+    `
+    DELETE FROM repo_event_state s
+    WHERE s.guild_id=$1
+      AND s.channel_id=$2
+      AND LOWER(s.owner)=LOWER($3)
+      AND LOWER(s.repo)=LOWER($4)
+      AND NOT EXISTS (
+        SELECT 1
+        FROM branch_logs b
+        WHERE b.guild_id=$1
+          AND b.channel_id=$2
+          AND LOWER(b.owner)=LOWER($3)
+          AND LOWER(b.repo)=LOWER($4)
+          AND b.id<>$5
+      )
+    `,
+    [guildId, channelId, owner, repo, saved.id],
+  );
+
+  return saved;
 }
 
 export async function removeBranchLog(
@@ -788,4 +810,67 @@ export async function getWebhookEndpoint(id) {
     [id],
   );
   return rows[0] || null;
+}
+
+
+export async function setTicketRoleId(ticketId, roleId) {
+  await pool.query(
+    'UPDATE tickets SET ticket_role_id=$1 WHERE id=$2',
+    [roleId, ticketId],
+  );
+}
+
+export async function clearTicketRoleId(ticketId) {
+  await pool.query(
+    'UPDATE tickets SET ticket_role_id=NULL WHERE id=$1',
+    [ticketId],
+  );
+}
+
+export async function repoEventTargets() {
+  const { rows } = await pool.query(
+    `
+    SELECT DISTINCT guild_id, channel_id, owner, repo
+    FROM branch_logs
+    ORDER BY guild_id, channel_id, owner, repo
+    `,
+  );
+  return rows;
+}
+
+export async function repoEventCheckpoint(guildId, channelId, owner, repo) {
+  const { rows } = await pool.query(
+    `
+    SELECT last_seen_event_id
+    FROM repo_event_state
+    WHERE guild_id=$1
+      AND channel_id=$2
+      AND LOWER(owner)=LOWER($3)
+      AND LOWER(repo)=LOWER($4)
+    `,
+    [guildId, channelId, owner, repo],
+  );
+
+  return rows[0]?.last_seen_event_id || null;
+}
+
+export async function setRepoEventCheckpoint(
+  guildId,
+  channelId,
+  owner,
+  repo,
+  eventId,
+) {
+  await pool.query(
+    `
+    INSERT INTO repo_event_state
+      (guild_id, channel_id, owner, repo, last_seen_event_id, updated_at)
+    VALUES ($1,$2,$3,$4,$5,NOW())
+    ON CONFLICT (guild_id, channel_id, owner, repo)
+    DO UPDATE SET
+      last_seen_event_id=EXCLUDED.last_seen_event_id,
+      updated_at=NOW()
+    `,
+    [guildId, channelId, owner, repo, eventId],
+  );
 }

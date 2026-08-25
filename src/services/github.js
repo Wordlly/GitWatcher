@@ -195,3 +195,19 @@ export async function compareBranchRange(guildId, owner, repo, base, head) {
 
   return response.data.commits || [];
 }
+
+
+export async function repositoryEvents(guildId, owner, repo) {
+  const token = await guildToken(guildId);
+
+  const response = await axios.get(
+    `${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/events`,
+    {
+      headers: headers(token),
+      timeout: 20000,
+      params: { per_page: 100 },
+    },
+  );
+
+  return response.data || [];
+}

@@ -75,6 +75,16 @@ export async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_branch_logs_lookup
       ON branch_logs(guild_id, owner, repo, branch);
 
+    CREATE TABLE IF NOT EXISTS repo_event_state (
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      last_seen_event_id TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (guild_id, channel_id, owner, repo)
+    );
+
     CREATE TABLE IF NOT EXISTS tickets (
       id BIGSERIAL PRIMARY KEY,
       guild_id TEXT NOT NULL,
@@ -94,8 +104,12 @@ export async function migrate() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       completed_at TIMESTAMPTZ,
       closed_at TIMESTAMPTZ,
+      ticket_role_id TEXT,
       UNIQUE (guild_id, ticket_number)
     );
+
+    ALTER TABLE tickets
+      ADD COLUMN IF NOT EXISTS ticket_role_id TEXT;
 
     CREATE TABLE IF NOT EXISTS ticket_assignees (
       ticket_id BIGINT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,

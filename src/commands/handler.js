@@ -39,6 +39,7 @@ import {
 } from '../services/store.js';
 import { ticketMessage } from '../ui/tickets.js';
 import { refreshTicket } from '../ui/tickets.js';
+import { deleteTicketRole } from '../services/ticketRoles.js';
 
 function admin(interaction) {
   return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
@@ -90,7 +91,8 @@ async function help(interaction) {
         value:
           '`/gitwatcher logs repository:<url> branch:main`\n' +
           '`/gitwatcher unlog repository:<url> branch:main`\n' +
-          '`/gitwatcher log-list`',
+          '`/gitwatcher log-list`\n' +
+          'New branch creation is also logged for repositories being logged.',
       },
     );
 
@@ -472,10 +474,21 @@ export async function handleCommand(interaction) {
       });
     }
 
+    let roleWarning = '';
+
+    try {
+      await deleteTicketRole(interaction.guild, result.ticket.id);
+    } catch (error) {
+      console.error('Ticket role cleanup failed during transfer:', error);
+      roleWarning = ' The old ticket role could not be removed.';
+    }
+
     await refreshTicket(interaction.client, result.ticket.id);
 
     return interaction.reply({
-      content: `GW-${String(number).padStart(4, '0')} transferred to <@${user.id}>.`,
+      content:
+        `GW-${String(number).padStart(4, '0')} transferred to <@${user.id}>.` +
+        roleWarning,
       ephemeral: true,
     });
   }

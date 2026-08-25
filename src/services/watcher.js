@@ -9,12 +9,16 @@ import {
   allBranchLogs,
   removeBranchLogById,
   setBranchLogLastSeen,
+  repoEventTargets,
+  repoEventCheckpoint,
+  setRepoEventCheckpoint,
 } from './store.js';
 import {
   compare,
   mainHead,
   branchHead,
   compareBranchRange,
+  repositoryEvents,
 } from './github.js';
 import { refreshTicket } from '../ui/tickets.js';
 
@@ -193,6 +197,121 @@ async function runBranchLogs(client) {
   }
 }
 
+
+
+async function logBranchCreation(client, target, event) {
+  try {
+    const channel = await client.channels.fetch(target.channel_id);
+    const actor = event.actor?.login || 'Unknown user';
+    const branch = event.payload?.ref || 'unknown';
+
+    await channel.send(
+      `🌿 **${actor}** created branch \`${branch}\` in ` +
+      `\`${target.owner}/${target.repo}\`.`,
+    );
+  } catch (error) {
+    console.error(
+      `Could not send branch creation log ${target.guild_id}:${target.owner}/${target.repo}:`,
+      error.message,
+    );
+  }
+}
+
+async function processRepoEventsForTarget(client, target, events) {
+  if (!events.length) return;
+
+  const newestEventId = events[0].id;
+  const checkpoint = await repoEventCheckpoint(
+    target.guild_id,
+    target.channel_id,
+    target.owner,
+    target.repo,
+  );
+
+  // First run for this repo/channel establishes a baseline so old branch
+  // creation events are not dumped into Discord.
+  if (!checkpoint) {
+    await setRepoEventCheckpoint(
+      target.guild_id,
+      target.channel_id,
+      target.owner,
+      target.repo,
+      newestEventId,
+    );
+    return;
+  }
+
+  const checkpointIndex = events.findIndex(
+    (event) => event.id === checkpoint,
+  );
+
+  // GitHub's event feed is bounded. If our old checkpoint is no longer in
+  // the returned page, reset rather than replaying uncertain history.
+  if (checkpointIndex === -1) {
+    await setRepoEventCheckpoint(
+      target.guild_id,
+      target.channel_id,
+      target.owner,
+      target.repo,
+      newestEventId,
+    );
+    return;
+  }
+
+  const newEvents = events.slice(0, checkpointIndex).reverse();
+
+  for (const event of newEvents) {
+    if (
+      event.type === 'CreateEvent' &&
+      event.payload?.ref_type === 'branch'
+    ) {
+      await logBranchCreation(client, target, event);
+    }
+  }
+
+  await setRepoEventCheckpoint(
+    target.guild_id,
+    target.channel_id,
+    target.owner,
+    target.repo,
+    newestEventId,
+  );
+}
+
+async function runRepoEvents(client) {
+  const targets = await repoEventTargets();
+  const grouped = new Map();
+
+  for (const target of targets) {
+    const key =
+      `${target.guild_id}:${target.owner.toLowerCase()}/${target.repo.toLowerCase()}`;
+
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(target);
+  }
+
+  for (const group of grouped.values()) {
+    const sample = group[0];
+
+    try {
+      const events = await repositoryEvents(
+        sample.guild_id,
+        sample.owner,
+        sample.repo,
+      );
+
+      for (const target of group) {
+        await processRepoEventsForTarget(client, target, events);
+      }
+    } catch (error) {
+      console.error(
+        `Repository event log error ${sample.guild_id}:${sample.owner}/${sample.repo}:`,
+        error.message,
+      );
+    }
+  }
+}
+
 export function startWatcher(client) {
   const run = async () => {
     const repos = await allActiveRepos();
@@ -209,6 +328,7 @@ export function startWatcher(client) {
     }
 
     await runBranchLogs(client);
+    await runRepoEvents(client);
   };
 
   run().catch(console.error);

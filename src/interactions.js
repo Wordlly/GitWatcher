@@ -1,8 +1,13 @@
 import {
   acceptTicket,
   signOffTicket,
+  ticketById,
 } from './services/store.js';
 import { refreshTicket } from './ui/tickets.js';
+import {
+  assignTicketRole,
+  deleteTicketRole,
+} from './services/ticketRoles.js';
 import {
   handleAuthModal,
   handleCommand,
@@ -47,8 +52,24 @@ export async function handleInteraction(interaction) {
         }
 
         await interaction.deferReply({ ephemeral: true });
+
+        let roleWarning = '';
+
+        try {
+          await assignTicketRole(
+            interaction.guild,
+            ticketId,
+            interaction.user.id,
+          );
+        } catch (error) {
+          console.error('Ticket role assignment failed:', error);
+          roleWarning =
+            '\n⚠️ Ticket accepted, but I could not assign the Discord role. ' +
+            'Make sure GitWatcher has **Manage Roles** and its bot role is above ticket roles.';
+        }
+
         await refreshTicket(interaction.client, ticketId);
-        return interaction.editReply(result.message);
+        return interaction.editReply(result.message + roleWarning);
       }
 
       if (action === 'signoff') {
@@ -65,8 +86,22 @@ export async function handleInteraction(interaction) {
         }
 
         await interaction.deferReply({ ephemeral: true });
+
+        let roleWarning = '';
+        const ticket = await ticketById(ticketId);
+
+        if (ticket?.status === 'CLOSED') {
+          try {
+            await deleteTicketRole(interaction.guild, ticketId);
+          } catch (error) {
+            console.error('Ticket role cleanup failed:', error);
+            roleWarning =
+              '\n⚠️ Ticket closed, but I could not remove its Discord role.';
+          }
+        }
+
         await refreshTicket(interaction.client, ticketId);
-        return interaction.editReply(result.message);
+        return interaction.editReply(result.message + roleWarning);
       }
     }
   } catch (error) {
