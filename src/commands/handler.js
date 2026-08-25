@@ -51,9 +51,9 @@ async function help(interaction) {
       {
         name: '1. Link yourself',
         value:
-          '`/gitwatcher setuser github:Wordlly`\n' +
+          '`/gitwatcher setuser {Case sensitive username}`\n' +
           'or\n' +
-          '`/gitwatcher setuser github:https://github.com/Wordlly`',
+          '`/gitwatcher setuser {Github profile link}`',
       },
       {
         name: '2. Private repo?',
@@ -63,13 +63,13 @@ async function help(interaction) {
         name: '3. Watch a repo',
         value:
           'In the repo’s Discord channel:\n' +
-          '`/gitwatcher watch repository:https://github.com/owner/repo`',
+          '`/gitwatcher watch {repository link}`',
       },
       {
         name: '4. Create work',
         value:
-          '`/gitwatcher assign user:@John description:Setup development notes`\n' +
-          '`/gitwatcher ffa description:Create Django repo slots:2`',
+          '`/gitwatcher assign {User @} {Commit description}`\n' +
+          '`/gitwatcher ffa {Commit description} {Number of users for this task}`',
       },
       {
         name: '5. Commit normally',
