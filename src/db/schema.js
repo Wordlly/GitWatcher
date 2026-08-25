@@ -37,9 +37,21 @@ export async function migrate() {
       is_private BOOLEAN NOT NULL DEFAULT FALSE,
       last_seen_sha TEXT,
       active BOOLEAN NOT NULL DEFAULT TRUE,
+      webhook_only BOOLEAN NOT NULL DEFAULT FALSE,
       created_by TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (guild_id, owner, repo)
+    );
+
+    ALTER TABLE repositories
+      ADD COLUMN IF NOT EXISTS webhook_only BOOLEAN NOT NULL DEFAULT FALSE;
+
+    CREATE TABLE IF NOT EXISTS webhook_endpoints (
+      id TEXT PRIMARY KEY,
+      repository_id BIGINT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+      secret_encrypted TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (repository_id)
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS one_active_repo_per_channel

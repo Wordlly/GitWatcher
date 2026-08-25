@@ -52,6 +52,19 @@ export const gitwatcherCommand = {
     },
     {
       type: ApplicationCommandOptionType.Subcommand,
+      name: 'webhook',
+      description: 'Connect a private repo using a GitHub webhook.',
+      options: [
+        {
+          type: ApplicationCommandOptionType.String,
+          name: 'repository',
+          description: 'GitHub repository URL',
+          required: true,
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionType.Subcommand,
       name: 'watch',
       description: 'Watch a GitHub repo in this channel.',
       options: [

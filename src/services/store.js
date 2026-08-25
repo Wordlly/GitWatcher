@@ -100,6 +100,18 @@ export async function whoami(guildId, discordUserId) {
   return rows[0] || null;
 }
 
+export async function discordForGithubLogin(guildId, githubLogin) {
+  const { rows } = await pool.query(
+    `
+    SELECT discord_user_id
+    FROM github_users
+    WHERE guild_id=$1 AND LOWER(github_login)=LOWER($2)
+    `,
+    [guildId, githubLogin],
+  );
+  return rows[0]?.discord_user_id || null;
+}
+
 export async function discordForGithub(guildId, githubUserId) {
   const { rows } = await pool.query(
     `
@@ -191,7 +203,7 @@ export async function reposForGuild(guildId) {
 
 export async function allActiveRepos() {
   const { rows } = await pool.query(
-    'SELECT * FROM repositories WHERE active=TRUE ORDER BY id',
+    'SELECT * FROM repositories WHERE active=TRUE AND webhook_only=FALSE ORDER BY id',
   );
   return rows;
 }
@@ -692,4 +704,88 @@ export async function setBranchLogLastSeen(id, sha) {
     'UPDATE branch_logs SET last_seen_sha=$1 WHERE id=$2',
     [sha, id],
   );
+}
+
+
+export async function createWebhookWatch({
+  id,
+  guildId,
+  channelId,
+  owner,
+  repo,
+  secretEncrypted,
+  createdBy,
+}) {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    await client.query(
+      `
+      UPDATE repositories
+      SET active=FALSE, channel_id=NULL
+      WHERE guild_id=$1 AND channel_id=$2 AND active=TRUE
+      `,
+      [guildId, channelId],
+    );
+
+    const repoResult = await client.query(
+      `
+      INSERT INTO repositories
+        (guild_id, channel_id, owner, repo, branch, is_private,
+         last_seen_sha, active, webhook_only, created_by)
+      VALUES ($1,$2,$3,$4,'main',TRUE,NULL,TRUE,TRUE,$5)
+      ON CONFLICT (guild_id, owner, repo)
+      DO UPDATE SET
+        channel_id=EXCLUDED.channel_id,
+        branch='main',
+        is_private=TRUE,
+        last_seen_sha=NULL,
+        active=TRUE,
+        webhook_only=TRUE,
+        created_by=EXCLUDED.created_by
+      RETURNING *
+      `,
+      [guildId, channelId, owner, repo, createdBy],
+    );
+
+    const repository = repoResult.rows[0];
+
+    await client.query(
+      'DELETE FROM webhook_endpoints WHERE repository_id=$1',
+      [repository.id],
+    );
+
+    await client.query(
+      `
+      INSERT INTO webhook_endpoints(id, repository_id, secret_encrypted)
+      VALUES ($1,$2,$3)
+      `,
+      [id, repository.id, secretEncrypted],
+    );
+
+    await client.query('COMMIT');
+    return repository;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getWebhookEndpoint(id) {
+  const { rows } = await pool.query(
+    `
+    SELECT
+      w.id, w.secret_encrypted, w.repository_id,
+      r.guild_id, r.channel_id, r.owner, r.repo
+    FROM webhook_endpoints w
+    JOIN repositories r ON r.id=w.repository_id
+    WHERE w.id=$1 AND r.active=TRUE
+    `,
+    [id],
+  );
+  return rows[0] || null;
 }

@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 import {
   EmbedBuilder,
   ModalBuilder,
@@ -33,6 +35,7 @@ import {
   addBranchLog,
   removeBranchLog,
   branchLogsForGuild,
+  createWebhookWatch,
 } from '../services/store.js';
 import { ticketMessage } from '../ui/tickets.js';
 import { refreshTicket } from '../ui/tickets.js';
@@ -55,9 +58,9 @@ async function help(interaction) {
       {
         name: '1. Link yourself',
         value:
-          '`/gitwatcher setuser {github username (case sensitive)}`\n' +
+          '`/gitwatcher setuser github:Wordlly`\n' +
           'or\n' +
-          '`/gitwatcher setuser {github profile url}`',
+          '`/gitwatcher setuser github:https://github.com/Wordlly`',
       },
       {
         name: '2. Private repo?',
@@ -67,13 +70,13 @@ async function help(interaction) {
         name: '3. Watch a repo',
         value:
           'In the repo’s Discord channel:\n' +
-          '`/gitwatcher watch {Github repo main url}`',
+          '`/gitwatcher watch repository:https://github.com/owner/repo`',
       },
       {
         name: '4. Create work',
         value:
-          '`/gitwatcher assign {@user} {commit description}`\n' +
-          '`/gitwatcher ffa {commit description} {number of users}`',
+          '`/gitwatcher assign user:@John description:Setup development notes`\n' +
+          '`/gitwatcher ffa description:Create Django repo slots:2`',
       },
       {
         name: '5. Commit normally',
@@ -194,6 +197,40 @@ export async function handleCommand(interaction) {
       content: linked
         ? `You are linked to GitHub \`${linked.github_login}\`.`
         : 'You have not linked GitHub yet. Use `/gitwatcher setuser`.',
+      ephemeral: true,
+    });
+  }
+
+  if (sub === 'webhook') {
+    if (!admin(interaction)) {
+      return interaction.reply({
+        content: 'You need Manage Server permission.',
+        ephemeral: true,
+      });
+    }
+
+    const input = interaction.options.getString('repository', true);
+    const parsed = parseRepo(input);
+    const webhookId = crypto.randomBytes(18).toString('hex');
+    const webhookSecret = crypto.randomBytes(32).toString('hex');
+
+    await createWebhookWatch({
+      id: webhookId,
+      guildId: interaction.guildId,
+      channelId: interaction.channelId,
+      owner: parsed.owner,
+      repo: parsed.repo,
+      secretEncrypted: encryptSecret(webhookSecret),
+      createdBy: interaction.user.id,
+    });
+
+    return interaction.reply({
+      content:
+        `🔗 Private repo webhook created for \`${parsed.owner}/${parsed.repo}\`.\n\n` +
+        `**Payload URL**\n\`https://gitwatcher.up.railway.app/github/webhook/${webhookId}\`\n\n` +
+        `**Secret**\n\`${webhookSecret}\`\n\n` +
+        '**GitHub settings:** Content type `application/json`, choose **Just the push event**, and keep SSL verification enabled.\n' +
+        'GitWatcher will use pushes to `main` for ticket completion. You only need to copy this secret into GitHub once.',
       ephemeral: true,
     });
   }
