@@ -1,14 +1,12 @@
-
 import asyncio
 import uvicorn
 from .bot import bot
 from .config import settings
-from .db import close_pool
-from .webhook import app
+from .database.connection import close_pool
+from .web import app
 
 async def run_web():
-    server = uvicorn.Server(uvicorn.Config(
-        app, host="0.0.0.0", port=settings.port, log_level="info"))
+    server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=settings.port, log_level="info"))
     await server.serve()
 
 async def main():
