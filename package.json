@@ -1,0 +1,22 @@
+{
+  "name": "gitwatcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord-first GitHub task watcher",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "check": "node --check src/app.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.15.0",
+    "discord.js": "^14.26.0",
+    "dotenv": "^17.2.0",
+    "express": "^5.1.0",
+    "pg": "^8.16.0"
+  }
+}
