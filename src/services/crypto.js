@@ -3,7 +3,7 @@ import { config } from '../config.js';
 
 const key = crypto
   .createHash('sha256')
-  .update(config.encryptionKey)
+  .update(`gitwatcher:mvp:${config.discordToken}`)
   .digest();
 
 export function encryptSecret(plainText) {
