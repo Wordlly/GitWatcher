@@ -73,6 +73,50 @@ export const gitwatcherCommand = {
       name: 'repos',
       description: 'Show this server’s watched repos.',
     },
+
+    {
+      type: ApplicationCommandOptionType.Subcommand,
+      name: 'logs',
+      description: 'Log commits from a GitHub branch into this channel.',
+      options: [
+        {
+          type: ApplicationCommandOptionType.String,
+          name: 'repository',
+          description: 'GitHub repository URL',
+          required: true,
+        },
+        {
+          type: ApplicationCommandOptionType.String,
+          name: 'branch',
+          description: 'Branch to log, for example main or development',
+          required: true,
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionType.Subcommand,
+      name: 'unlog',
+      description: 'Stop logging a GitHub branch in this channel.',
+      options: [
+        {
+          type: ApplicationCommandOptionType.String,
+          name: 'repository',
+          description: 'GitHub repository URL',
+          required: true,
+        },
+        {
+          type: ApplicationCommandOptionType.String,
+          name: 'branch',
+          description: 'Branch to stop logging',
+          required: true,
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionType.Subcommand,
+      name: 'log-list',
+      description: 'Show branch logs configured for this server.',
+    },
     {
       type: ApplicationCommandOptionType.Subcommand,
       name: 'assign',

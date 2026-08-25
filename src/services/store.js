@@ -610,3 +610,86 @@ export async function setLastSeen(repositoryId, sha) {
     [sha, repositoryId],
   );
 }
+
+
+export async function addBranchLog({
+  guildId,
+  channelId,
+  owner,
+  repo,
+  branch,
+  lastSeenSha,
+  createdBy,
+}) {
+  const { rows } = await pool.query(
+    `
+    INSERT INTO branch_logs
+      (guild_id, channel_id, owner, repo, branch, last_seen_sha, created_by)
+    VALUES ($1,$2,$3,$4,$5,$6,$7)
+    ON CONFLICT (guild_id, channel_id, owner, repo, branch)
+    DO UPDATE SET
+      last_seen_sha=EXCLUDED.last_seen_sha,
+      created_by=EXCLUDED.created_by
+    RETURNING *
+    `,
+    [guildId, channelId, owner, repo, branch, lastSeenSha, createdBy],
+  );
+
+  return rows[0];
+}
+
+export async function removeBranchLog(
+  guildId,
+  channelId,
+  owner,
+  repo,
+  branch,
+) {
+  const result = await pool.query(
+    `
+    DELETE FROM branch_logs
+    WHERE guild_id=$1
+      AND channel_id=$2
+      AND LOWER(owner)=LOWER($3)
+      AND LOWER(repo)=LOWER($4)
+      AND branch=$5
+    `,
+    [guildId, channelId, owner, repo, branch],
+  );
+
+  return result.rowCount > 0;
+}
+
+export async function removeBranchLogById(id) {
+  await pool.query(
+    'DELETE FROM branch_logs WHERE id=$1',
+    [id],
+  );
+}
+
+export async function allBranchLogs() {
+  const { rows } = await pool.query(
+    'SELECT * FROM branch_logs ORDER BY id',
+  );
+  return rows;
+}
+
+export async function branchLogsForGuild(guildId) {
+  const { rows } = await pool.query(
+    `
+    SELECT *
+    FROM branch_logs
+    WHERE guild_id=$1
+    ORDER BY channel_id, owner, repo, branch
+    `,
+    [guildId],
+  );
+  return rows;
+}
+
+export async function setBranchLogLastSeen(id, sha) {
+  await pool.query(
+    'UPDATE branch_logs SET last_seen_sha=$1 WHERE id=$2',
+    [sha, id],
+  );
+}

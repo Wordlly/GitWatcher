@@ -6,8 +6,16 @@ import {
   matchingTickets,
   normalizeTitle,
   setLastSeen,
+  allBranchLogs,
+  removeBranchLogById,
+  setBranchLogLastSeen,
 } from './store.js';
-import { compare, mainHead } from './github.js';
+import {
+  compare,
+  mainHead,
+  branchHead,
+  compareBranchRange,
+} from './github.js';
 import { refreshTicket } from '../ui/tickets.js';
 
 async function notify(client, repository, text) {
@@ -85,6 +93,106 @@ async function checkRepo(client, repository) {
   await setLastSeen(repository.id, head);
 }
 
+
+
+async function logCommit(client, subscription, commit) {
+  try {
+    const channel = await client.channels.fetch(subscription.channel_id);
+
+    const firstLine = (commit.commit?.message || '').split('\n')[0] || 'No commit message';
+    const author =
+      commit.author?.login ||
+      commit.commit?.author?.name ||
+      'Unknown author';
+
+    const shortSha = commit.sha.slice(0, 7);
+    const url =
+      commit.html_url ||
+      `https://github.com/${subscription.owner}/${subscription.repo}/commit/${commit.sha}`;
+
+    await channel.send(
+      `🔨 **${author}** pushed to \`${subscription.branch}\`\n` +
+      `[\`${shortSha}\`](${url}) ${firstLine}`,
+    );
+  } catch (error) {
+    console.error(
+      `Could not send branch log ${subscription.id}:`,
+      error.message,
+    );
+  }
+}
+
+async function checkBranchLog(client, subscription) {
+  const current = await branchHead(
+    subscription.guild_id,
+    subscription.owner,
+    subscription.repo,
+    subscription.branch,
+  );
+
+  if (!current.exists) {
+    await removeBranchLogById(subscription.id);
+
+    try {
+      const channel = await client.channels.fetch(subscription.channel_id);
+      await channel.send(
+        `🗑️ Stopped logging \`${subscription.owner}/${subscription.repo}:${subscription.branch}\` because that branch no longer exists.`,
+      );
+    } catch {
+      // Subscription has already been removed, so there is nothing left to poll.
+    }
+
+    return;
+  }
+
+  if (!subscription.last_seen_sha) {
+    await setBranchLogLastSeen(subscription.id, current.sha);
+    return;
+  }
+
+  if (subscription.last_seen_sha === current.sha) {
+    return;
+  }
+
+  try {
+    const commits = await compareBranchRange(
+      subscription.guild_id,
+      subscription.owner,
+      subscription.repo,
+      subscription.last_seen_sha,
+      current.sha,
+    );
+
+    for (const commit of commits) {
+      await logCommit(client, subscription, commit);
+    }
+  } catch (error) {
+    // A force-push/rewrite can make the old checkpoint incomparable.
+    // Reset without replaying uncertain history.
+    console.error(
+      `Branch log checkpoint reset ${subscription.owner}/${subscription.repo}:${subscription.branch}:`,
+      error.message,
+    );
+  }
+
+  await setBranchLogLastSeen(subscription.id, current.sha);
+}
+
+async function runBranchLogs(client) {
+  const logs = await allBranchLogs();
+
+  for (const subscription of logs) {
+    try {
+      await checkBranchLog(client, subscription);
+    } catch (error) {
+      console.error(
+        `Branch log error ${subscription.guild_id}:${subscription.owner}/${subscription.repo}:${subscription.branch}:`,
+        error.message,
+      );
+    }
+  }
+}
+
 export function startWatcher(client) {
   const run = async () => {
     const repos = await allActiveRepos();
@@ -99,6 +207,8 @@ export function startWatcher(client) {
         );
       }
     }
+
+    await runBranchLogs(client);
   };
 
   run().catch(console.error);

@@ -15,6 +15,7 @@ import {
   parseProfile,
   parseRepo,
   validateRepo,
+  branchHead,
 } from '../services/github.js';
 import {
   credentialStatus,
@@ -29,6 +30,9 @@ import {
   unwatchChannel,
   watchRepo,
   whoami,
+  addBranchLog,
+  removeBranchLog,
+  branchLogsForGuild,
 } from '../services/store.js';
 import { ticketMessage } from '../ui/tickets.js';
 import { refreshTicket } from '../ui/tickets.js';
@@ -51,9 +55,9 @@ async function help(interaction) {
       {
         name: '1. Link yourself',
         value:
-          '`/gitwatcher setuser {Case sensitive username}`\n' +
+          '`/gitwatcher setuser {github username (case sensitive)}`\n' +
           'or\n' +
-          '`/gitwatcher setuser {Github profile link}`',
+          '`/gitwatcher setuser {github profile url}`',
       },
       {
         name: '2. Private repo?',
@@ -63,13 +67,13 @@ async function help(interaction) {
         name: '3. Watch a repo',
         value:
           'In the repo’s Discord channel:\n' +
-          '`/gitwatcher watch {repository link}`',
+          '`/gitwatcher watch {Github repo main url}`',
       },
       {
         name: '4. Create work',
         value:
-          '`/gitwatcher assign {User @} {Commit description}`\n' +
-          '`/gitwatcher ffa {Commit description} {Number of users for this task}`',
+          '`/gitwatcher assign {@user} {commit description}`\n' +
+          '`/gitwatcher ffa {commit description} {number of users}`',
       },
       {
         name: '5. Commit normally',
@@ -77,6 +81,13 @@ async function help(interaction) {
           'Ticket: `Setup development notes`\n' +
           'Commit: `setup development notes` ✅\n' +
           'Capitalisation and repeated spaces do not matter.',
+      },
+      {
+        name: 'Optional: branch logs',
+        value:
+          '`/gitwatcher logs repository:<url> branch:main`\n' +
+          '`/gitwatcher unlog repository:<url> branch:main`\n' +
+          '`/gitwatcher log-list`',
       },
     );
 
@@ -251,6 +262,97 @@ export async function handleCommand(interaction) {
             )
             .join('\n')
         : 'This server is not watching any repositories yet.',
+      ephemeral: true,
+    });
+  }
+
+
+  if (sub === 'logs') {
+    if (!admin(interaction)) {
+      return interaction.reply({
+        content: 'You need Manage Server permission.',
+        ephemeral: true,
+      });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const repositoryUrl = interaction.options.getString('repository', true);
+    const branch = interaction.options.getString('branch', true).trim();
+
+    if (!branch) {
+      return interaction.editReply('Give me a branch name.');
+    }
+
+    const parsed = parseRepo(repositoryUrl);
+    const checked = await branchHead(
+      interaction.guildId,
+      parsed.owner,
+      parsed.repo,
+      branch,
+    );
+
+    if (!checked.exists) {
+      return interaction.editReply(
+        `❌ I cannot find branch \`${branch}\` in \`${parsed.owner}/${parsed.repo}\`.`,
+      );
+    }
+
+    await addBranchLog({
+      guildId: interaction.guildId,
+      channelId: interaction.channelId,
+      owner: parsed.owner,
+      repo: parsed.repo,
+      branch: checked.branch,
+      lastSeenSha: checked.sha,
+      createdBy: interaction.user.id,
+    });
+
+    return interaction.editReply(
+      `📝 Logging new commits from \`${parsed.owner}/${parsed.repo}:${checked.branch}\` in this channel.`,
+    );
+  }
+
+  if (sub === 'unlog') {
+    if (!admin(interaction)) {
+      return interaction.reply({
+        content: 'You need Manage Server permission.',
+        ephemeral: true,
+      });
+    }
+
+    const repositoryUrl = interaction.options.getString('repository', true);
+    const branch = interaction.options.getString('branch', true).trim();
+    const parsed = parseRepo(repositoryUrl);
+
+    const removed = await removeBranchLog(
+      interaction.guildId,
+      interaction.channelId,
+      parsed.owner,
+      parsed.repo,
+      branch,
+    );
+
+    return interaction.reply({
+      content: removed
+        ? `Stopped logging \`${parsed.owner}/${parsed.repo}:${branch}\` in this channel.`
+        : 'That branch is not being logged in this channel.',
+      ephemeral: true,
+    });
+  }
+
+  if (sub === 'log-list') {
+    const logs = await branchLogsForGuild(interaction.guildId);
+
+    return interaction.reply({
+      content: logs.length
+        ? logs
+            .map(
+              (log) =>
+                `• <#${log.channel_id}> → \`${log.owner}/${log.repo}:${log.branch}\``,
+            )
+            .join('\n')
+        : 'This server has no branch logs configured.',
       ephemeral: true,
     });
   }

@@ -46,6 +46,23 @@ export async function migrate() {
       ON repositories(guild_id, channel_id)
       WHERE active = TRUE AND channel_id IS NOT NULL;
 
+
+    CREATE TABLE IF NOT EXISTS branch_logs (
+      id BIGSERIAL PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      last_seen_sha TEXT,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (guild_id, channel_id, owner, repo, branch)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_branch_logs_lookup
+      ON branch_logs(guild_id, owner, repo, branch);
+
     CREATE TABLE IF NOT EXISTS tickets (
       id BIGSERIAL PRIMARY KEY,
       guild_id TEXT NOT NULL,

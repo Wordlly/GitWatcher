@@ -154,3 +154,44 @@ export async function compare(repository, base, head) {
 
   return response.data.commits || [];
 }
+
+
+export async function branchHead(guildId, owner, repo, branch) {
+  const token = await guildToken(guildId);
+
+  try {
+    const response = await axios.get(
+      `${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch)}`,
+      {
+        headers: headers(token),
+        timeout: 15000,
+      },
+    );
+
+    return {
+      exists: true,
+      sha: response.data.commit.sha,
+      branch: response.data.name,
+    };
+  } catch (error) {
+    if (error.response?.status === 404) {
+      return { exists: false };
+    }
+    throw error;
+  }
+}
+
+export async function compareBranchRange(guildId, owner, repo, base, head) {
+  const token = await guildToken(guildId);
+
+  const response = await axios.get(
+    `${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/compare/${base}...${head}`,
+    {
+      headers: headers(token),
+      timeout: 20000,
+      params: { per_page: 100 },
+    },
+  );
+
+  return response.data.commits || [];
+}
