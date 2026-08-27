@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { migrate } from './db/schema.js';
 import { gitwatcherCommand } from './commands/definition.js';
 import { handleInteraction } from './interactions.js';
+import { handleMessage } from './messages.js';
 import { startWatcher } from './services/watcher.js';
 import { handleGithubWebhook } from './services/webhook.js';
 
@@ -17,6 +18,8 @@ console.log('PostgreSQL ready.');
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
   ],
 });
 
@@ -49,27 +52,13 @@ app.listen(config.port, '0.0.0.0', () => {
 });
 
 client.on('interactionCreate', handleInteraction);
+client.on('messageCreate', handleMessage);
 
 client.once('ready', async () => {
   console.log(`Discord connected as ${client.user.tag}`);
 
-  console.log(
-    'Registering /gitwatcher subcommands:',
-    gitwatcherCommand.options.map((option) => option.name),
-  );
-
-  const commands = await client.application.commands.set([
-    gitwatcherCommand,
-  ]);
-
-  console.log(
-    'Registered Discord commands:',
-    commands.map((command) => ({
-      name: command.name,
-      id: command.id,
-      options: command.options.map((option) => option.name),
-    })),
-  );
+  await client.application.commands.set([gitwatcherCommand]);
+  console.log('Global /gitwatcher command registered.');
 
   startWatcher(client);
   console.log('GitHub watcher started.');

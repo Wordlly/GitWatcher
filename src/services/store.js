@@ -4,6 +4,46 @@ export function normalizeTitle(value) {
   return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
 
+export async function setMicromanagerRole(guildId, roleId) {
+  await pool.query(
+    `
+    INSERT INTO guild_settings(guild_id, next_ticket_number, micromanager_role_id)
+    VALUES ($1,1,$2)
+    ON CONFLICT (guild_id)
+    DO UPDATE SET micromanager_role_id=EXCLUDED.micromanager_role_id
+    `,
+    [guildId, roleId],
+  );
+}
+
+export async function micromanagerRole(guildId) {
+  const { rows } = await pool.query(
+    'SELECT micromanager_role_id FROM guild_settings WHERE guild_id=$1',
+    [guildId],
+  );
+  return rows[0]?.micromanager_role_id || null;
+}
+
+export async function setAdminLogChannel(guildId, channelId) {
+  await pool.query(
+    `
+    INSERT INTO guild_settings(guild_id, next_ticket_number, admin_log_channel_id)
+    VALUES ($1,1,$2)
+    ON CONFLICT (guild_id)
+    DO UPDATE SET admin_log_channel_id=EXCLUDED.admin_log_channel_id
+    `,
+    [guildId, channelId],
+  );
+}
+
+export async function adminLogChannel(guildId) {
+  const { rows } = await pool.query(
+    'SELECT admin_log_channel_id FROM guild_settings WHERE guild_id=$1',
+    [guildId],
+  );
+  return rows[0]?.admin_log_channel_id || null;
+}
+
 export async function saveCredential(guildId, encrypted, user, updatedBy) {
   await pool.query(
     `
@@ -369,8 +409,8 @@ export async function acceptTicket(ticketId, guildId, discordUserId) {
     await client.query('BEGIN');
 
     const ticketResult = await client.query(
-      'SELECT * FROM tickets WHERE id=$1 FOR UPDATE',
-      [ticketId],
+      'SELECT * FROM tickets WHERE id=$1 AND guild_id=$2 FOR UPDATE',
+      [ticketId, guildId],
     );
     const ticket = ticketResult.rows[0];
 
@@ -407,7 +447,7 @@ export async function acceptTicket(ticketId, guildId, discordUserId) {
     if (ticket.ffa) {
       if (existing.rows[0]?.accepted) {
         await client.query('ROLLBACK');
-        return { ok: false, message: 'You already accepted this ticket.' };
+        return { ok: true, message: 'Ticket already accepted.' };
       }
 
       if (count >= ticket.max_assignees) {
@@ -433,7 +473,7 @@ export async function acceptTicket(ticketId, guildId, discordUserId) {
 
       if (existing.rows[0].accepted) {
         await client.query('ROLLBACK');
-        return { ok: false, message: 'You already accepted this ticket.' };
+        return { ok: true, message: 'Ticket already accepted.' };
       }
 
       await client.query(
@@ -475,15 +515,15 @@ export async function acceptTicket(ticketId, guildId, discordUserId) {
   }
 }
 
-export async function signOffTicket(ticketId, discordUserId) {
+export async function signOffTicket(ticketId, guildId, discordUserId) {
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
     const ticketResult = await client.query(
-      'SELECT * FROM tickets WHERE id=$1 FOR UPDATE',
-      [ticketId],
+      'SELECT * FROM tickets WHERE id=$1 AND guild_id=$2 FOR UPDATE',
+      [ticketId, guildId],
     );
     const ticket = ticketResult.rows[0];
 
@@ -556,6 +596,7 @@ export async function transferTicket(guildId, number, newUserId) {
   try {
     await client.query('BEGIN');
     await client.query('DELETE FROM ticket_assignees WHERE ticket_id=$1', [ticket.id]);
+    await client.query('DELETE FROM pending_reassignments WHERE ticket_id=$1', [ticket.id]);
     await client.query(
       'INSERT INTO ticket_assignees(ticket_id, discord_user_id) VALUES ($1,$2)',
       [ticket.id, newUserId],
@@ -568,11 +609,208 @@ export async function transferTicket(guildId, number, newUserId) {
           completed_by_github_id=NULL,
           completed_by_github_login=NULL,
           completed_at=NULL,
-          closed_at=NULL
+          closed_at=NULL,
+          manual_closed=FALSE,
+          manual_closed_by=NULL
       WHERE id=$1
       `,
       [ticket.id],
     );
+    await client.query('COMMIT');
+    return { ok: true, ticket };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function declineTicket(ticketId, guildId, discordUserId) {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const ticketResult = await client.query(
+      'SELECT * FROM tickets WHERE id=$1 AND guild_id=$2 FOR UPDATE',
+      [ticketId, guildId],
+    );
+    const ticket = ticketResult.rows[0];
+
+    if (!ticket || ticket.ffa || ticket.status !== 'OPEN') {
+      await client.query('ROLLBACK');
+      return { ok: false, message: 'This ticket cannot be declined.' };
+    }
+
+    const assignee = await client.query(
+      `
+      SELECT * FROM ticket_assignees
+      WHERE ticket_id=$1 AND discord_user_id=$2 AND accepted=FALSE
+      `,
+      [ticketId, discordUserId],
+    );
+
+    if (!assignee.rows[0]) {
+      await client.query('ROLLBACK');
+      return { ok: false, message: 'Only the person this ticket was assigned to can decline it.' };
+    }
+
+    await client.query(
+      `
+      INSERT INTO ticket_rejections
+        (guild_id, ticket_id, rejected_user_id, delegated_by, task_title)
+      VALUES ($1,$2,$3,$4,$5)
+      `,
+      [guildId, ticketId, discordUserId, ticket.created_by, ticket.title],
+    );
+
+    await client.query('DELETE FROM ticket_assignees WHERE ticket_id=$1', [ticketId]);
+
+    await client.query(
+      `
+      INSERT INTO pending_reassignments
+        (ticket_id, guild_id, channel_id, delegator_user_id, rejected_user_id, created_at)
+      VALUES ($1,$2,$3,$4,$5,NOW())
+      ON CONFLICT (ticket_id)
+      DO UPDATE SET
+        guild_id=EXCLUDED.guild_id,
+        channel_id=EXCLUDED.channel_id,
+        delegator_user_id=EXCLUDED.delegator_user_id,
+        rejected_user_id=EXCLUDED.rejected_user_id,
+        created_at=NOW()
+      `,
+      [ticketId, guildId, ticket.channel_id, ticket.created_by, discordUserId],
+    );
+
+    await client.query('COMMIT');
+    return { ok: true, ticket };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function pendingReassignments(guildId, channelId, delegatorUserId) {
+  const { rows } = await pool.query(
+    `
+    SELECT p.*, t.ticket_number, t.title, t.ffa, t.status
+    FROM pending_reassignments p
+    JOIN tickets t ON t.id=p.ticket_id AND t.guild_id=p.guild_id
+    WHERE p.guild_id=$1 AND p.channel_id=$2 AND p.delegator_user_id=$3
+    ORDER BY p.created_at ASC
+    `,
+    [guildId, channelId, delegatorUserId],
+  );
+  return rows;
+}
+
+export async function reassignDeclinedTicket(ticketId, guildId, delegatorUserId, newUserId) {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const pendingResult = await client.query(
+      `
+      SELECT p.*, t.*
+      FROM pending_reassignments p
+      JOIN tickets t ON t.id=p.ticket_id AND t.guild_id=p.guild_id
+      WHERE p.ticket_id=$1 AND p.guild_id=$2 AND p.delegator_user_id=$3
+      FOR UPDATE
+      `,
+      [ticketId, guildId, delegatorUserId],
+    );
+
+    const pending = pendingResult.rows[0];
+    if (!pending) {
+      await client.query('ROLLBACK');
+      return { ok: false, message: 'No declined ticket is waiting for you to reassign.' };
+    }
+
+    if (newUserId === pending.rejected_user_id) {
+      await client.query('ROLLBACK');
+      return { ok: false, message: 'Choose a different member from the person who declined.' };
+    }
+
+    await client.query('DELETE FROM ticket_assignees WHERE ticket_id=$1', [ticketId]);
+    await client.query(
+      'INSERT INTO ticket_assignees(ticket_id, discord_user_id) VALUES ($1,$2)',
+      [ticketId, newUserId],
+    );
+    await client.query('DELETE FROM pending_reassignments WHERE ticket_id=$1', [ticketId]);
+    await client.query(
+      `
+      UPDATE tickets
+      SET status='OPEN', manual_closed=FALSE, manual_closed_by=NULL
+      WHERE id=$1 AND guild_id=$2
+      `,
+      [ticketId, guildId],
+    );
+
+    await client.query('COMMIT');
+    return { ok: true, ticketId };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function manualCloseTicket(ticketId, guildId, discordUserId) {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const ticketResult = await client.query(
+      'SELECT * FROM tickets WHERE id=$1 AND guild_id=$2 FOR UPDATE',
+      [ticketId, guildId],
+    );
+    const ticket = ticketResult.rows[0];
+
+    if (!ticket || ticket.ffa || ticket.status !== 'IN_PROGRESS') {
+      await client.query('ROLLBACK');
+      return { ok: false, message: 'Only an in-progress single-assignee ticket can be closed manually.' };
+    }
+
+    const member = await client.query(
+      `
+      SELECT * FROM ticket_assignees
+      WHERE ticket_id=$1 AND discord_user_id=$2 AND accepted=TRUE
+      `,
+      [ticketId, discordUserId],
+    );
+
+    if (!member.rows[0]) {
+      await client.query('ROLLBACK');
+      return { ok: false, message: 'Only the accepted assignee can close this ticket manually.' };
+    }
+
+    await client.query(
+      `
+      UPDATE tickets
+      SET status='CLOSED',
+          manual_closed=TRUE,
+          manual_closed_by=$1,
+          closed_at=NOW()
+      WHERE id=$2 AND guild_id=$3
+      `,
+      [discordUserId, ticketId, guildId],
+    );
+
+    await client.query(
+      `
+      UPDATE ticket_assignees
+      SET signed_off=TRUE, signed_off_at=NOW()
+      WHERE ticket_id=$1 AND discord_user_id=$2
+      `,
+      [ticketId, discordUserId],
+    );
+
     await client.query('COMMIT');
     return { ok: true, ticket };
   } catch (error) {

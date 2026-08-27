@@ -19,12 +19,14 @@ export async function ticketMessage(ticket) {
   const accepted = assignees.filter((x) => x.accepted);
   const signed = assignees.filter((x) => x.signed_off);
 
-  const statusText = {
-    OPEN: '🟨 Awaiting acceptance',
-    IN_PROGRESS: '🟨 In progress',
-    COMPLETED: '🟩 Task has been completed',
-    CLOSED: '✅ Ticket has been closed',
-  }[ticket.status] || ticket.status;
+  const statusText = ticket.manual_closed
+    ? '🟩 Manual: Ticket has been closed'
+    : ({
+        OPEN: '🟨 Awaiting acceptance',
+        IN_PROGRESS: '🟨 In progress',
+        COMPLETED: '🟩 Task has been completed',
+        CLOSED: '✅ Ticket has been closed',
+      }[ticket.status] || ticket.status);
 
   const embed = new EmbedBuilder()
     .setTitle(`🎫 ${ticketCode(ticket)} — ${ticket.title}`)
@@ -68,25 +70,51 @@ export async function ticketMessage(ticket) {
     );
   }
 
-  const accept = new ButtonBuilder()
-    .setCustomId(`gw:accept:${ticket.id}`)
-    .setLabel('Accept Ticket')
-    .setEmoji('✅')
-    .setStyle(ButtonStyle.Primary)
-    .setDisabled(!['OPEN', 'IN_PROGRESS'].includes(ticket.status));
+  const buttons = [];
 
-  const signoff = new ButtonBuilder()
-    .setCustomId(`gw:signoff:${ticket.id}`)
-    .setLabel('Sign Off')
-    .setEmoji('✔️')
-    .setStyle(ButtonStyle.Success)
-    .setDisabled(ticket.status !== 'COMPLETED');
+  buttons.push(
+    new ButtonBuilder()
+      .setCustomId(`gw:accept:${ticket.id}`)
+      .setLabel('Accept Ticket')
+      .setEmoji('✅')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(!['OPEN', 'IN_PROGRESS'].includes(ticket.status)),
+  );
+
+  if (!ticket.ffa) {
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId(`gw:decline:${ticket.id}`)
+        .setLabel('Decline')
+        .setEmoji('✖️')
+        .setStyle(ButtonStyle.Danger)
+        .setDisabled(ticket.status !== 'OPEN'),
+    );
+  }
+
+  buttons.push(
+    new ButtonBuilder()
+      .setCustomId(`gw:signoff:${ticket.id}`)
+      .setLabel('Sign Off')
+      .setEmoji('✔️')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(ticket.status !== 'COMPLETED'),
+  );
+
+  if (!ticket.ffa) {
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId(`gw:manualclose:${ticket.id}`)
+        .setLabel('Close Manually')
+        .setEmoji('🔒')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(ticket.status !== 'IN_PROGRESS'),
+    );
+  }
 
   return {
     embeds: [embed],
-    components: [
-      new ActionRowBuilder().addComponents(accept, signoff),
-    ],
+    components: [new ActionRowBuilder().addComponents(buttons)],
   };
 }
 

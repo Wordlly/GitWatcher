@@ -19,6 +19,24 @@ export const gitwatcherCommand = {
     },
     {
       type: ApplicationCommandOptionType.Subcommand,
+      name: 'micromanager',
+      description: 'Choose the role allowed to manage GitWatcher work.',
+      options: [
+        {
+          type: ApplicationCommandOptionType.Role,
+          name: 'role',
+          description: 'Role allowed to use auth, watch, assign and ffa',
+          required: true,
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionType.Subcommand,
+      name: 'adminlog',
+      description: 'Send GitWatcher security/admin events to this channel.',
+    },
+    {
+      type: ApplicationCommandOptionType.Subcommand,
       name: 'auth',
       description: 'Give this server access to private GitHub repos.',
     },

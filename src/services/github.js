@@ -1,6 +1,11 @@
 import axios from 'axios';
 import { pool } from '../db/pool.js';
-import { decryptSecret } from './crypto.js';
+import {
+  decryptSecret,
+  encryptSecret,
+  hasDedicatedEncryptionKey,
+  isLegacySecret,
+} from './crypto.js';
 
 const API = 'https://api.github.com';
 
@@ -18,43 +23,82 @@ function headers(token) {
 export function parseProfile(value) {
   const trimmed = value.trim();
 
-  if (!trimmed.includes('://')) {
-    if (!trimmed || trimmed.includes('/')) {
-      throw new Error('Enter a GitHub username or profile URL.');
+  let username = trimmed;
+
+  if (trimmed.includes('://')) {
+    const url = new URL(trimmed);
+
+    if (
+      !['github.com', 'www.github.com'].includes(url.hostname.toLowerCase()) ||
+      url.username ||
+      url.password ||
+      url.port ||
+      url.search ||
+      url.hash
+    ) {
+      throw new Error('That is not a normal GitHub profile URL.');
     }
-    return trimmed.replace(/^@/, '');
+
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts.length !== 1) {
+      throw new Error('Paste a GitHub profile URL, not a repository URL.');
+    }
+
+    username = parts[0];
+  } else {
+    username = trimmed.replace(/^@/, '');
   }
 
-  const url = new URL(trimmed);
-
-  if (!['github.com', 'www.github.com'].includes(url.hostname.toLowerCase())) {
-    throw new Error('That is not a GitHub profile URL.');
+  if (
+    !username ||
+    username.length > 39 ||
+    !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(username)
+  ) {
+    throw new Error('Enter a valid GitHub username or profile URL.');
   }
 
-  const parts = url.pathname.split('/').filter(Boolean);
-  if (parts.length !== 1) {
-    throw new Error('Paste a GitHub profile URL, not a repository URL.');
-  }
-
-  return parts[0];
+  return username;
 }
 
 export function parseRepo(value) {
-  const url = new URL(value.trim());
+  let url;
 
-  if (!['github.com', 'www.github.com'].includes(url.hostname.toLowerCase())) {
-    throw new Error('Paste a normal GitHub repository URL.');
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error('Paste a full GitHub repository URL beginning with https://github.com/.');
+  }
+
+  if (
+    url.protocol !== 'https:' ||
+    !['github.com', 'www.github.com'].includes(url.hostname.toLowerCase()) ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error('Paste a normal HTTPS GitHub repository URL.');
   }
 
   const parts = url.pathname.split('/').filter(Boolean);
-  if (parts.length < 2) {
-    throw new Error('That does not look like a GitHub repository URL.');
+  if (parts.length !== 2) {
+    throw new Error('Paste the repository root URL, for example https://github.com/owner/repo.');
   }
 
-  return {
-    owner: parts[0],
-    repo: parts[1].replace(/\.git$/i, ''),
-  };
+  const owner = parts[0];
+  const repo = parts[1].replace(/\.git$/i, '');
+
+  if (
+    !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(owner) ||
+    !repo ||
+    repo.length > 100 ||
+    !/^[A-Za-z0-9._-]+$/.test(repo)
+  ) {
+    throw new Error('That GitHub owner or repository name is invalid.');
+  }
+
+  return { owner, repo };
 }
 
 export async function guildToken(guildId) {
@@ -64,7 +108,20 @@ export async function guildToken(guildId) {
   );
 
   if (!rows[0]) return null;
-  return decryptSecret(rows[0].token_encrypted);
+
+  const stored = rows[0].token_encrypted;
+  const token = decryptSecret(stored);
+
+  // Seamlessly migrate old Discord-token-derived ciphertext once a dedicated
+  // Railway encryption key is configured.
+  if (isLegacySecret(stored) && hasDedicatedEncryptionKey()) {
+    await pool.query(
+      'UPDATE github_credentials SET token_encrypted=$1, updated_at=NOW() WHERE guild_id=$2',
+      [encryptSecret(token), guildId],
+    );
+  }
+
+  return token;
 }
 
 export async function getUser(username, token = null) {

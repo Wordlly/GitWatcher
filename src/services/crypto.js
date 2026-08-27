@@ -1,12 +1,20 @@
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 
-const key = crypto
+const legacyKey = crypto
   .createHash('sha256')
   .update(`gitwatcher:mvp:${config.discordToken}`)
   .digest();
 
-export function encryptSecret(plainText) {
+const dedicatedKey = config.encryptionKey
+  ? crypto.scryptSync(
+      config.encryptionKey,
+      'gitwatcher:credential-encryption:v2',
+      32,
+    )
+  : null;
+
+function encryptWithKey(plainText, key, version = null) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
@@ -16,19 +24,23 @@ export function encryptSecret(plainText) {
   ]);
 
   const tag = cipher.getAuthTag();
-
-  return [
+  const pieces = [
     iv.toString('base64url'),
     tag.toString('base64url'),
     encrypted.toString('base64url'),
-  ].join('.');
+  ];
+
+  return version ? [version, ...pieces].join('.') : pieces.join('.');
 }
 
-export function decryptSecret(value) {
-  const [ivText, tagText, encryptedText] = value.split('.');
+function decryptWithKey(value, key, offset = 0) {
+  const pieces = value.split('.');
+  const ivText = pieces[offset];
+  const tagText = pieces[offset + 1];
+  const encryptedText = pieces[offset + 2];
 
   if (!ivText || !tagText || !encryptedText) {
-    throw new Error('Stored GitHub credential is invalid.');
+    throw new Error('Stored credential is invalid.');
   }
 
   const decipher = crypto.createDecipheriv(
@@ -43,4 +55,33 @@ export function decryptSecret(value) {
     decipher.update(Buffer.from(encryptedText, 'base64url')),
     decipher.final(),
   ]).toString('utf8');
+}
+
+export function encryptSecret(plainText) {
+  if (dedicatedKey) {
+    return encryptWithKey(plainText, dedicatedKey, 'v2');
+  }
+
+  return encryptWithKey(plainText, legacyKey);
+}
+
+export function decryptSecret(value) {
+  if (value.startsWith('v2.')) {
+    if (!dedicatedKey) {
+      throw new Error(
+        'GITWATCHER_ENCRYPTION_KEY is required to decrypt this stored credential.',
+      );
+    }
+    return decryptWithKey(value, dedicatedKey, 1);
+  }
+
+  return decryptWithKey(value, legacyKey);
+}
+
+export function isLegacySecret(value) {
+  return !value.startsWith('v2.');
+}
+
+export function hasDedicatedEncryptionKey() {
+  return Boolean(dedicatedKey);
 }

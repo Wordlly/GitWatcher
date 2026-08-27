@@ -5,8 +5,16 @@ export async function migrate() {
     CREATE TABLE IF NOT EXISTS guild_settings (
       guild_id TEXT PRIMARY KEY,
       next_ticket_number INTEGER NOT NULL DEFAULT 1,
+      micromanager_role_id TEXT,
+      admin_log_channel_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    ALTER TABLE guild_settings
+      ADD COLUMN IF NOT EXISTS micromanager_role_id TEXT;
+
+    ALTER TABLE guild_settings
+      ADD COLUMN IF NOT EXISTS admin_log_channel_id TEXT;
 
     CREATE TABLE IF NOT EXISTS github_credentials (
       guild_id TEXT PRIMARY KEY,
@@ -105,11 +113,19 @@ export async function migrate() {
       completed_at TIMESTAMPTZ,
       closed_at TIMESTAMPTZ,
       ticket_role_id TEXT,
+      manual_closed BOOLEAN NOT NULL DEFAULT FALSE,
+      manual_closed_by TEXT,
       UNIQUE (guild_id, ticket_number)
     );
 
     ALTER TABLE tickets
       ADD COLUMN IF NOT EXISTS ticket_role_id TEXT;
+
+    ALTER TABLE tickets
+      ADD COLUMN IF NOT EXISTS manual_closed BOOLEAN NOT NULL DEFAULT FALSE;
+
+    ALTER TABLE tickets
+      ADD COLUMN IF NOT EXISTS manual_closed_by TEXT;
 
     CREATE TABLE IF NOT EXISTS ticket_assignees (
       ticket_id BIGINT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
@@ -120,6 +136,33 @@ export async function migrate() {
       signed_off_at TIMESTAMPTZ,
       PRIMARY KEY (ticket_id, discord_user_id)
     );
+
+
+
+    CREATE TABLE IF NOT EXISTS ticket_rejections (
+      id BIGSERIAL PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      ticket_id BIGINT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+      rejected_user_id TEXT NOT NULL,
+      delegated_by TEXT NOT NULL,
+      task_title TEXT NOT NULL,
+      rejected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ticket_rejections_guild
+      ON ticket_rejections(guild_id, rejected_at DESC);
+
+    CREATE TABLE IF NOT EXISTS pending_reassignments (
+      ticket_id BIGINT PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+      guild_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      delegator_user_id TEXT NOT NULL,
+      rejected_user_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pending_reassignments_lookup
+      ON pending_reassignments(guild_id, channel_id, delegator_user_id, created_at);
 
     CREATE INDEX IF NOT EXISTS idx_repositories_guild_active
       ON repositories(guild_id, active);

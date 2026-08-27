@@ -3,7 +3,6 @@ import crypto from 'crypto';
 import {
   EmbedBuilder,
   ModalBuilder,
-  PermissionFlagsBits,
   TextInputBuilder,
   TextInputStyle,
   ActionRowBuilder,
@@ -36,13 +35,30 @@ import {
   removeBranchLog,
   branchLogsForGuild,
   createWebhookWatch,
+  setMicromanagerRole,
+  setAdminLogChannel,
 } from '../services/store.js';
 import { ticketMessage } from '../ui/tickets.js';
 import { refreshTicket } from '../ui/tickets.js';
 import { deleteTicketRole } from '../services/ticketRoles.js';
+import { canManageServer, canMicromanage, isServerAdmin } from '../services/permissions.js';
 
 function admin(interaction) {
-  return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+  return canManageServer(interaction);
+}
+
+async function manager(interaction) {
+  return canMicromanage(interaction);
+}
+
+async function requireManager(interaction) {
+  if (await manager(interaction)) return true;
+
+  await interaction.reply({
+    content: 'You need Administrator permission or this server’s GitWatcher Micromanager role.',
+    ephemeral: true,
+  });
+  return false;
 }
 
 function parseTicketNumber(value) {
@@ -117,13 +133,48 @@ export async function handleCommand(interaction) {
     });
   }
 
-  if (sub === 'auth') {
-    if (!admin(interaction)) {
+  if (sub === 'micromanager') {
+    if (!isServerAdmin(interaction)) {
       return interaction.reply({
-        content: 'You need Manage Server permission.',
+        content: 'Only a server administrator can change the Micromanager role.',
         ephemeral: true,
       });
     }
+
+    const role = interaction.options.getRole('role', true);
+    if (role.managed || role.id === interaction.guildId) {
+      return interaction.reply({
+        content: 'Choose a normal server role, not an integration-managed role or @everyone.',
+        ephemeral: true,
+      });
+    }
+
+    await setMicromanagerRole(interaction.guildId, role.id);
+    return interaction.reply({
+      content:
+        `✅ <@&${role.id}> is now the GitWatcher Micromanager role. ` +
+        'Members with it can use `/gitwatcher auth`, `/gitwatcher watch`, `/gitwatcher assign`, and `/gitwatcher ffa`.',
+      ephemeral: true,
+    });
+  }
+
+  if (sub === 'adminlog') {
+    if (!isServerAdmin(interaction)) {
+      return interaction.reply({
+        content: 'Only a server administrator can configure the admin log.',
+        ephemeral: true,
+      });
+    }
+
+    await setAdminLogChannel(interaction.guildId, interaction.channelId);
+    return interaction.reply({
+      content: '✅ GitWatcher admin logging is now enabled in this channel.',
+      ephemeral: true,
+    });
+  }
+
+  if (sub === 'auth') {
+    if (!(await requireManager(interaction))) return;
 
     const modal = new ModalBuilder()
       .setCustomId('gw:auth-modal')
@@ -154,12 +205,7 @@ export async function handleCommand(interaction) {
   }
 
   if (sub === 'auth-remove') {
-    if (!admin(interaction)) {
-      return interaction.reply({
-        content: 'You need Manage Server permission.',
-        ephemeral: true,
-      });
-    }
+    if (!(await requireManager(interaction))) return;
 
     const removed = await removeCredential(interaction.guildId);
     return interaction.reply({
@@ -238,12 +284,7 @@ export async function handleCommand(interaction) {
   }
 
   if (sub === 'watch') {
-    if (!admin(interaction)) {
-      return interaction.reply({
-        content: 'You need Manage Server permission.',
-        ephemeral: true,
-      });
-    }
+    if (!(await requireManager(interaction))) return;
 
     await interaction.deferReply();
 
@@ -269,12 +310,7 @@ export async function handleCommand(interaction) {
   }
 
   if (sub === 'unwatch') {
-    if (!admin(interaction)) {
-      return interaction.reply({
-        content: 'You need Manage Server permission.',
-        ephemeral: true,
-      });
-    }
+    if (!(await requireManager(interaction))) return;
 
     const removed = await unwatchChannel(
       interaction.guildId,
@@ -397,12 +433,7 @@ export async function handleCommand(interaction) {
   }
 
   if (sub === 'assign' || sub === 'ffa') {
-    if (!admin(interaction)) {
-      return interaction.reply({
-        content: 'You need Manage Server permission.',
-        ephemeral: true,
-      });
-    }
+    if (!(await requireManager(interaction))) return;
 
     const repository = await repoForChannel(
       interaction.guildId,
@@ -495,6 +526,13 @@ export async function handleCommand(interaction) {
 }
 
 export async function handleAuthModal(interaction) {
+  if (!(await canMicromanage(interaction))) {
+    return interaction.reply({
+      content: 'You are not allowed to change this server’s GitHub credentials.',
+      ephemeral: true,
+    });
+  }
+
   await interaction.deferReply({ ephemeral: true });
 
   const token = interaction.fields.getTextInputValue('token').trim();

@@ -52,3 +52,14 @@ export async function deleteTicketRole(guild, ticketId) {
   await clearTicketRoleId(ticket.id);
   return true;
 }
+
+
+export async function memberHasTicketRole(guild, ticketId, discordUserId) {
+  const ticket = await ticketById(ticketId);
+  if (!ticket || ticket.guild_id !== guild.id || !ticket.ticket_role_id) {
+    return false;
+  }
+
+  const member = await guild.members.fetch(discordUserId).catch(() => null);
+  return Boolean(member?.roles.cache.has(ticket.ticket_role_id));
+}
