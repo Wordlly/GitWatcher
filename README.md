@@ -19,11 +19,10 @@ GitWatcher currently supports:
 -Requiring assignees to sign off before a ticket closes.
 
 Changelog
--Added /gitwatcher micromanager to assign a trusted Discord role access to management commands such as /auth, /watch, /assign, and /ffa.
+-Added /gitwatcher micromanager to assign a Discord role access to management commands such as /auth, /watch, /assign, and /ffa.
 -Added /gitwatcher adminlog for logging rejected tasks and manually completed tickets.
 -Improved multi-server isolation by enforcing guild_id checks across ticket and configuration actions.
 -Added Accept / Decline controls for manually assigned tickets.
 -Added reassignment flow after a declined ticket, restricted to the original delegator.
 -Added ticket-role verification for protected ticket actions such as sign-off and manual closure.
 -Added manual ticket completion, now displays as Manual: Ticket has been closed.
--Rejections and manual completions are now stored in PostgreSQL for future reporting.
