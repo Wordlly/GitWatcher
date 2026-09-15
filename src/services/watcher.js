@@ -21,6 +21,7 @@ import {
   repositoryEvents,
 } from './github.js';
 import { refreshTicket } from '../ui/tickets.js';
+import { formatNzTimestamp } from './logFormatting.js';
 
 async function notify(client, repository, text) {
   try {
@@ -116,6 +117,7 @@ async function logCommit(client, subscription, commit) {
 
     await channel.send(
       `🔨 **${author}** pushed to \`${subscription.branch}\`\n` +
+      `🕘 ${formatNzTimestamp()}\n` +
       `[\`${shortSha}\`](${url}) ${firstLine}`,
     );
   } catch (error) {
@@ -140,7 +142,8 @@ async function checkBranchLog(client, subscription) {
     try {
       const channel = await client.channels.fetch(subscription.channel_id);
       await channel.send(
-        `🗑️ Stopped logging \`${subscription.owner}/${subscription.repo}:${subscription.branch}\` because that branch no longer exists.`,
+        `🗑️ Stopped logging \`${subscription.owner}/${subscription.repo}:${subscription.branch}\` because that branch no longer exists.\n` +
+        `🕘 ${formatNzTimestamp()}`,
       );
     } catch {
       // Subscription has already been removed, so there is nothing left to poll.
@@ -207,7 +210,8 @@ async function logBranchCreation(client, target, event) {
 
     await channel.send(
       `🌿 **${actor}** created branch \`${branch}\` in ` +
-      `\`${target.owner}/${target.repo}\`.`,
+      `\`${target.owner}/${target.repo}\`.\n` +
+      `🕘 ${formatNzTimestamp()}`,
     );
   } catch (error) {
     console.error(
