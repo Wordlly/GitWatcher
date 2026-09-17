@@ -21,7 +21,10 @@ import {
   repositoryEvents,
 } from './github.js';
 import { refreshTicket } from '../ui/tickets.js';
-import { formatNzTimestamp } from './logFormatting.js';
+import {
+  formatEventTimestamp,
+  formatNzTimestamp,
+} from './logFormatting.js';
 
 async function notify(client, repository, text) {
   try {
@@ -70,6 +73,13 @@ async function processCommit(client, repository, commit) {
 async function checkRepo(client, repository) {
   const head = await mainHead(repository);
 
+  console.log(
+    `[Watcher] ticket repo ${repository.owner}/${repository.repo} ` +
+    `private=${Boolean(repository.is_private)} ` +
+    `head=${head.slice(0, 7)} ` +
+    `previous=${repository.last_seen_sha?.slice(0, 7) || 'none'}`,
+  );
+
   if (!repository.last_seen_sha) {
     await setLastSeen(repository.id, head);
     return;
@@ -117,7 +127,7 @@ async function logCommit(client, subscription, commit) {
 
     await channel.send(
       `🔨 **${author}** pushed to \`${subscription.branch}\`\n` +
-      `🕘 ${formatNzTimestamp()}\n` +
+      `🕘 ${formatEventTimestamp(commit)}\n` +
       `[\`${shortSha}\`](${url}) ${firstLine}`,
     );
   } catch (error) {
@@ -134,6 +144,12 @@ async function checkBranchLog(client, subscription) {
     subscription.owner,
     subscription.repo,
     subscription.branch,
+  );
+
+  console.log(
+    `[Watcher] branch log ${subscription.owner}/${subscription.repo}:${subscription.branch} ` +
+    `current=${current.sha?.slice(0, 7) || 'missing'} ` +
+    `previous=${subscription.last_seen_sha?.slice(0, 7) || 'none'}`,
   );
 
   if (!current.exists) {
@@ -170,6 +186,11 @@ async function checkBranchLog(client, subscription) {
       current.sha,
     );
 
+    console.log(
+      `[Watcher] branch compare ${subscription.owner}/${subscription.repo}:${subscription.branch} ` +
+      `commits=${commits.length}`,
+    );
+
     for (const commit of commits) {
       await logCommit(client, subscription, commit);
     }
@@ -187,6 +208,8 @@ async function checkBranchLog(client, subscription) {
 
 async function runBranchLogs(client) {
   const logs = await allBranchLogs();
+
+  console.log(`[Watcher] branch log subscriptions=${logs.length}`);
 
   for (const subscription of logs) {
     try {
@@ -211,7 +234,7 @@ async function logBranchCreation(client, target, event) {
     await channel.send(
       `🌿 **${actor}** created branch \`${branch}\` in ` +
       `\`${target.owner}/${target.repo}\`.\n` +
-      `🕘 ${formatNzTimestamp()}`,
+      `🕘 ${formatEventTimestamp(event)}`,
     );
   } catch (error) {
     console.error(
@@ -286,6 +309,8 @@ async function runRepoEvents(client) {
   const targets = await repoEventTargets();
   const grouped = new Map();
 
+  console.log(`[Watcher] repository event targets=${targets.length}`);
+
   for (const target of targets) {
     const key =
       `${target.guild_id}:${target.owner.toLowerCase()}/${target.repo.toLowerCase()}`;
@@ -317,22 +342,43 @@ async function runRepoEvents(client) {
 }
 
 export function startWatcher(client) {
+  let cycleNumber = 0;
+  let activeCycles = 0;
+
   const run = async () => {
-    const repos = await allActiveRepos();
+    const cycle = ++cycleNumber;
+    const startedAt = Date.now();
+    activeCycles += 1;
 
-    for (const repository of repos) {
-      try {
-        await checkRepo(client, repository);
-      } catch (error) {
-        console.error(
-          `Watcher error ${repository.guild_id}:${repository.owner}/${repository.repo}:`,
-          error.message,
-        );
+    console.log(
+      `[Watcher] cycle=${cycle} started active_cycles=${activeCycles}`,
+    );
+
+    try {
+      const repos = await allActiveRepos();
+
+      console.log(`[Watcher] cycle=${cycle} ticket_repos=${repos.length}`);
+
+      for (const repository of repos) {
+        try {
+          await checkRepo(client, repository);
+        } catch (error) {
+          console.error(
+            `Watcher error ${repository.guild_id}:${repository.owner}/${repository.repo}:`,
+            error.message,
+          );
+        }
       }
-    }
 
-    await runBranchLogs(client);
-    await runRepoEvents(client);
+      await runBranchLogs(client);
+      await runRepoEvents(client);
+    } finally {
+      activeCycles -= 1;
+      console.log(
+        `[Watcher] cycle=${cycle} finished duration_ms=${Date.now() - startedAt} ` +
+        `active_cycles=${activeCycles}`,
+      );
+    }
   };
 
   run().catch(console.error);

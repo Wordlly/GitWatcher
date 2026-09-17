@@ -6,6 +6,7 @@ import {
   hasDedicatedEncryptionKey,
   isLegacySecret,
 } from './crypto.js';
+import { formatGitHubRequestLog } from './githubDiagnostics.js';
 
 const API = 'https://api.github.com';
 
@@ -18,6 +19,38 @@ function headers(token) {
 
   if (token) value.Authorization = `Bearer ${token}`;
   return value;
+}
+
+async function githubGet(label, url, options) {
+  const startedAt = Date.now();
+  const authenticated = Boolean(options.headers?.Authorization);
+
+  try {
+    const response = await axios.get(url, options);
+    console.log(
+      formatGitHubRequestLog({
+        label,
+        authenticated,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        rateRemaining: response.headers?.['x-ratelimit-remaining'],
+        rateReset: response.headers?.['x-ratelimit-reset'],
+      }),
+    );
+    return response;
+  } catch (error) {
+    console.error(
+      formatGitHubRequestLog({
+        label,
+        authenticated,
+        status: error.response?.status || 'network-error',
+        durationMs: Date.now() - startedAt,
+        rateRemaining: error.response?.headers?.['x-ratelimit-remaining'],
+        rateReset: error.response?.headers?.['x-ratelimit-reset'],
+      }),
+    );
+    throw error;
+  }
 }
 
 export function parseProfile(value) {
@@ -126,7 +159,8 @@ export async function guildToken(guildId) {
 
 export async function getUser(username, token = null) {
   try {
-    const response = await axios.get(
+    const response = await githubGet(
+      `getUser ${username}`,
       `${API}/users/${encodeURIComponent(username)}`,
       { headers: headers(token), timeout: 15000 },
     );
@@ -141,7 +175,7 @@ export async function getUser(username, token = null) {
 
 export async function authenticatedUser(token) {
   try {
-    const response = await axios.get(`${API}/user`, {
+    const response = await githubGet('authenticatedUser', `${API}/user`, {
       headers: headers(token),
       timeout: 15000,
     });
@@ -159,11 +193,12 @@ export async function validateRepo(guildId, owner, repo) {
 
   try {
     const [repoResponse, branchResponse] = await Promise.all([
-      axios.get(`${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
+      githubGet('validateRepo repository', `${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
         headers: headers(token),
         timeout: 15000,
       }),
-      axios.get(
+      githubGet(
+        'validateRepo main branch',
         `${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/main`,
         { headers: headers(token), timeout: 15000 },
       ),
@@ -190,7 +225,8 @@ export async function validateRepo(guildId, owner, repo) {
 export async function mainHead(repository) {
   const token = await guildToken(repository.guild_id);
 
-  const response = await axios.get(
+  const response = await githubGet(
+    `mainHead ${repository.owner}/${repository.repo}:main`,
     `${API}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}/branches/main`,
     { headers: headers(token), timeout: 15000 },
   );
@@ -200,7 +236,8 @@ export async function mainHead(repository) {
 
 export async function compare(repository, base, head) {
   const token = await guildToken(repository.guild_id);
-  const response = await axios.get(
+  const response = await githubGet(
+    `compare ${repository.owner}/${repository.repo}`,
     `${API}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}/compare/${base}...${head}`,
     {
       headers: headers(token),
@@ -217,7 +254,8 @@ export async function branchHead(guildId, owner, repo, branch) {
   const token = await guildToken(guildId);
 
   try {
-    const response = await axios.get(
+    const response = await githubGet(
+      `branchHead ${owner}/${repo}:${branch}`,
       `${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch)}`,
       {
         headers: headers(token),
@@ -241,7 +279,8 @@ export async function branchHead(guildId, owner, repo, branch) {
 export async function compareBranchRange(guildId, owner, repo, base, head) {
   const token = await guildToken(guildId);
 
-  const response = await axios.get(
+  const response = await githubGet(
+    `compareBranchRange ${owner}/${repo}`,
     `${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/compare/${base}...${head}`,
     {
       headers: headers(token),
@@ -257,7 +296,8 @@ export async function compareBranchRange(guildId, owner, repo, base, head) {
 export async function repositoryEvents(guildId, owner, repo) {
   const token = await guildToken(guildId);
 
-  const response = await axios.get(
+  const response = await githubGet(
+    `repositoryEvents ${owner}/${repo}`,
     `${API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/events`,
     {
       headers: headers(token),

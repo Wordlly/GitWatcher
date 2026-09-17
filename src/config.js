@@ -16,6 +16,8 @@ export const config = {
   pollSeconds: Math.max(Number(process.env.POLL_SECONDS || 300), 60),
 };
 
+console.log(`[Config] POLL_SECONDS=${config.pollSeconds}`);
+
 if (!config.discordToken || !config.databaseUrl) {
   console.error(
     'GitWatcher needs DISCORD_TOKEN and POSTGRES_URL (or DATABASE_URL) in Railway.'

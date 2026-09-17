@@ -1,5 +1,15 @@
 const NZ_TIME_ZONE = 'Pacific/Auckland';
 
+export function formatEventTimestamp(event, fallback = new Date()) {
+  const eventDate =
+    event?.commit?.committer?.date ||
+    event?.commit?.author?.date ||
+    event?.created_at ||
+    fallback;
+
+  return formatNzTimestamp(eventDate);
+}
+
 export function formatNzTimestamp(value = new Date()) {
   const parts = new Intl.DateTimeFormat('en-NZ', {
     timeZone: NZ_TIME_ZONE,
