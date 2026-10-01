@@ -5,10 +5,13 @@ import {
   ticketById,
 } from './services/store.js';
 import { ticketMessage, ticketCode } from './ui/tickets.js';
+import { handleAiChatMessage } from './ai-src-testing/chat.js';
 
 export async function handleMessage(message) {
   try {
     if (!message.guildId || !message.guild || message.author.bot) return;
+
+    if (await handleAiChatMessage(message)) return;
 
     const pending = await pendingReassignments(
       message.guildId,

@@ -19,6 +19,21 @@ export const gitwatcherCommand = {
     },
     {
       type: ApplicationCommandOptionType.Subcommand,
+      name: 'ai-api',
+      description: 'Configure the PreGP AI provider and temporary API key.',
+    },
+    {
+      type: ApplicationCommandOptionType.Subcommand,
+      name: 'startchat',
+      description: 'Start a PreGP AI conversation in this channel.',
+    },
+    {
+      type: ApplicationCommandOptionType.Subcommand,
+      name: 'stopchat',
+      description: 'Stop your PreGP AI conversation in this channel.',
+    },
+    {
+      type: ApplicationCommandOptionType.Subcommand,
       name: 'micromanager',
       description: 'Choose the role allowed to manage GitWatcher work.',
       options: [

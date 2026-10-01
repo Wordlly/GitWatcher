@@ -42,6 +42,7 @@ import { ticketMessage } from '../ui/tickets.js';
 import { refreshTicket } from '../ui/tickets.js';
 import { deleteTicketRole } from '../services/ticketRoles.js';
 import { canManageServer, canMicromanage, isServerAdmin } from '../services/permissions.js';
+import { showAiApiModal, startAiChat, stopAiChat } from '../ai-src-testing/chat.js';
 
 function admin(interaction) {
   return canManageServer(interaction);
@@ -110,6 +111,14 @@ async function help(interaction) {
           '`/gitwatcher log-list`\n' +
           'New branch creation is also logged for repositories being logged.',
       },
+      {
+        name: 'PreGP AI test chat',
+        value:
+          '`/gitwatcher ai-api` to select Bedrock, OpenAI, or Claude and enter a temporary API key.\n' +
+          '`/gitwatcher startchat` to chat in the current channel.\n' +
+          '`/gitwatcher stopchat` to end your chat and post a GP-only preassessment.\n' +
+          'Chats and preassessments are visible to this channel; keys and transcripts are not saved across restarts.',
+      },
     );
 
   await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -119,6 +128,10 @@ export async function handleCommand(interaction) {
   const sub = interaction.options.getSubcommand();
 
   if (sub === 'help') return help(interaction);
+
+  if (sub === 'ai-api') return showAiApiModal(interaction);
+  if (sub === 'startchat') return startAiChat(interaction);
+  if (sub === 'stopchat') return stopAiChat(interaction);
 
   if (sub === 'status') {
     const repos = await reposForGuild(interaction.guildId);

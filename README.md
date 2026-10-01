@@ -17,6 +17,15 @@ GitWatcher currently supports:
 -Matching commit messages to ticket descriptions.
 -Automatically marking matching tickets as completed.
 -Requiring assignees to sign off before a ticket closes.
+-Testing the PreGP AI interviewer in a Discord text channel.
+
+## PreGP AI test chat
+
+This test integration runs the copied PreGP prompts and schemas through Amazon Bedrock, OpenAI, or Claude. A server administrator or GitWatcher Micromanager configures the provider with `/gitwatcher ai-api`; the API key is held in process memory and must be entered again after GitWatcher restarts. Running the command again replaces the current provider and key.
+
+In the channel where you want the conversation to happen, run `/gitwatcher startchat`, then reply to PreGP’s questions as normal channel messages. Each person has a separate conversation context in that channel. `/gitwatcher stopchat` ends your chat and posts a GP-only preassessment from the answers gathered so far. The conversation and generated preassessment are visible to everyone who can read the channel. The integration does not persist the transcript or implement speech.
+
+Optional model overrides are `GITWATCHER_AI_BEDROCK_MODEL`, `GITWATCHER_AI_OPENAI_MODEL`, and `GITWATCHER_AI_CLAUDE_MODEL`. Bedrock also uses `AWS_REGION` or `AWS_DEFAULT_REGION` (default `ap-southeast-2`).
 
 Changelog
 -Added /gitwatcher micromanager to assign a Discord role access to management commands such as /auth, /watch, /assign, and /ffa.

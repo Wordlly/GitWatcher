@@ -16,6 +16,7 @@ import {
   handleAuthModal,
   handleCommand,
 } from './commands/handler.js';
+import { handleAiApiModal } from './ai-src-testing/chat.js';
 
 async function requireTicketRole(interaction, ticketId) {
   const hasRole = await memberHasTicketRole(
@@ -47,6 +48,13 @@ export async function handleInteraction(interaction) {
       interaction.customId === 'gw:auth-modal'
     ) {
       return await handleAuthModal(interaction);
+    }
+
+    if (
+      interaction.isModalSubmit() &&
+      interaction.customId === 'gw:ai-api-modal'
+    ) {
+      return await handleAiApiModal(interaction);
     }
 
     if (interaction.isButton()) {
