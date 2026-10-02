@@ -12,7 +12,7 @@ import { profileFingerprint, verifyEvidence } from '../../ai-testing/preGP/share
 import { turnMessages, summaryMessages, repairMessages, promptVersion } from '../../ai-testing/preGP/backend/prompts.ts';
 import { turnSchema, summarySchema } from '../../ai-testing/preGP/backend/schemas.ts';
 import { relinkCitations, resolveCitations, tagTranscript } from '../../ai-testing/preGP/backend/citations.ts';
-import { createAiClient } from './providers.js';
+import { createAiClient, providerModel, providerModelOptions } from './providers.js';
 
 const guildConfigurations = new Map();
 const conversations = new Map();
@@ -283,19 +283,30 @@ export async function showAiApiModal(interaction) {
     return interaction.reply({ content: 'You need Administrator permission or the GitWatcher Micromanager role.', ephemeral: true });
   }
   const current = guildConfigurations.get(interaction.guildId);
+  const selectedProvider = current?.provider;
+  const selectedModel = current?.model || (current?.provider ? providerModel(current.provider) : undefined);
   const options = [
     ['bedrock', 'Bedrock', 'Use an Amazon Bedrock API key.'],
     ['openai', 'OpenAI', 'Use an OpenAI API key.'],
     ['claude', 'Claude', 'Use an Anthropic API key.'],
-  ].map(([value, label, description]) => ({ value, label, description, ...(value === current?.provider ? { default: true } : {}) }));
+  ].map(([value, label, description]) => ({ value, label, description, ...(value === selectedProvider ? { default: true } : {}) }));
   const provider = new StringSelectMenuBuilder()
     .setCustomId('provider').setPlaceholder('Choose an AI provider').setMinValues(1).setMaxValues(1).setRequired(true).addOptions(options);
+  const model = new StringSelectMenuBuilder()
+    .setCustomId('model').setPlaceholder('Choose a model').setMinValues(1).setMaxValues(1).setRequired(true)
+    .addOptions(providerModelOptions.map((option) => ({
+      label: option.label,
+      value: option.modelId,
+      description: option.modelId,
+      ...(option.modelId === selectedModel ? { default: true } : {}),
+    })));
   const key = new TextInputBuilder()
     .setCustomId('key').setStyle(TextInputStyle.Short).setPlaceholder('Paste your provider API key')
     .setRequired(true).setMaxLength(1000);
   const modal = new ModalBuilder().setCustomId('gw:ai-api-modal').setTitle('Configure PreGP AI')
     .addLabelComponents(
       new LabelBuilder().setLabel('AI provider').setStringSelectMenuComponent(provider),
+      new LabelBuilder().setLabel('AI model').setStringSelectMenuComponent(model),
       new LabelBuilder().setLabel('API key').setTextInputComponent(key),
     );
   return interaction.showModal(modal);
@@ -307,13 +318,15 @@ export async function handleAiApiModal(interaction) {
     return interaction.reply({ content: 'You are not allowed to configure this server’s AI provider.', ephemeral: true });
   }
   const provider = interaction.fields.getStringSelectValues('provider')[0];
+  const model = interaction.fields.getStringSelectValues('model')[0];
   const key = interaction.fields.getTextInputValue('key').trim();
-  if (!['bedrock', 'openai', 'claude'].includes(provider) || !key) {
-    return interaction.reply({ content: 'Choose a provider and enter a non-empty API key.', ephemeral: true });
+  const modelOption = providerModelOptions.find((option) => option.modelId === model);
+  if (!['bedrock', 'openai', 'claude'].includes(provider) || !modelOption || modelOption.provider !== provider || !key) {
+    return interaction.reply({ content: 'Choose a model from the selected provider and enter a non-empty API key.', ephemeral: true });
   }
-  guildConfigurations.set(interaction.guildId, { provider, key });
+  guildConfigurations.set(interaction.guildId, { provider, model, key });
   return interaction.reply({
-    content: `✅ ${provider} is configured for this server until GitWatcher restarts. Re-running this command replaces the current key.`,
+    content: `✅ ${modelOption.label} is configured for this server until GitWatcher restarts. Re-running this command replaces the provider, model, and key.`,
     ephemeral: true,
   });
 }

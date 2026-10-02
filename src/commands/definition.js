@@ -20,7 +20,7 @@ export const gitwatcherCommand = {
     {
       type: ApplicationCommandOptionType.Subcommand,
       name: 'ai-api',
-      description: 'Configure the PreGP AI provider and temporary API key.',
+      description: 'Choose the PreGP AI provider and model, then enter a temporary API key.',
     },
     {
       type: ApplicationCommandOptionType.Subcommand,

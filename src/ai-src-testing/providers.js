@@ -1,5 +1,20 @@
 import { summarySchema, turnSchema } from '../../ai-testing/preGP/backend/schemas.ts';
 
+export const providerModelOptions = [
+  { provider: 'bedrock', label: 'Bedrock · Nova Pro', modelId: 'amazon.nova-pro-v1:0' },
+  { provider: 'bedrock', label: 'Bedrock · Nova Lite', modelId: 'amazon.nova-lite-v1:0' },
+  { provider: 'openai', label: 'OpenAI · GPT-6 Astra', modelId: 'gpt-6-astra' },
+  { provider: 'openai', label: 'OpenAI · GPT-6.1 Sol', modelId: 'gpt-6.1-sol' },
+  { provider: 'openai', label: 'OpenAI · GPT-6 Luna', modelId: 'gpt-6-luna' },
+  { provider: 'claude', label: 'Claude · Haiku 4.5', modelId: 'claude-haiku-4-5-20251001' },
+  { provider: 'claude', label: 'Claude · Sonnet 5.5', modelId: 'claude-sonnet-5-5' },
+  { provider: 'claude', label: 'Claude · Sonnet 5', modelId: 'claude-sonnet-5' },
+  { provider: 'claude', label: 'Claude · Sonnet 4.6', modelId: 'claude-sonnet-4-6' },
+  { provider: 'claude', label: 'Claude · Opus 5.5', modelId: 'claude-opus-5-5' },
+  { provider: 'claude', label: 'Claude · Opus 5', modelId: 'claude-opus-5' },
+  { provider: 'claude', label: 'Claude · Opus 4.8', modelId: 'claude-opus-4-8' },
+];
+
 const providerDefaults = {
   bedrock: {
     model: process.env.GITWATCHER_AI_BEDROCK_MODEL || 'amazon.nova-pro-v1:0',
@@ -19,10 +34,10 @@ function withoutAdditionalProperties(schema) {
   return schema;
 }
 
-function apiError(provider, status) {
-  if (status === 401 || status === 403) return `${provider} rejected the API key. Check the key and model access.`;
-  if (status === 429) return `${provider} is rate limiting this account. Wait a moment and try again.`;
-  return `${provider} returned an error (${status}). Check the model configuration and try again.`;
+function apiError(provider, status, detail = '') {
+  if (status === 401 || status === 403) return `${provider} rejected the request (${status})${detail}. Check the API key, permissions, and model access.`;
+  if (status === 429) return `${provider} is rate limiting this account (${status})${detail}. Wait a moment and try again.`;
+  return `${provider} returned an error (${status})${detail}. Check the model configuration and try again.`;
 }
 
 async function requestJson(url, headers, body, provider) {
@@ -38,7 +53,20 @@ async function requestJson(url, headers, body, provider) {
     if (error?.name === 'TimeoutError') throw new Error(`${provider} took too long to respond.`);
     throw new Error(`Could not reach ${provider}. Check the bot’s network connection.`);
   }
-  if (!response.ok) throw new Error(apiError(provider, response.status));
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const payload = await response.json();
+      const apiMessage = payload.error?.message || payload.message;
+      if (typeof apiMessage === 'string' && apiMessage.trim()) {
+        const safeMessage = apiMessage.replace(/\b(?:sk-|bedrock-api-key-)[^\s"'<>]+|\bBearer\s+[^\s"'<>]+/gi, '[redacted]').slice(0, 240);
+        detail = `: ${safeMessage}`;
+      }
+    } catch {
+      // Keep the status-only error if the provider did not return JSON.
+    }
+    throw new Error(apiError(provider, response.status, detail));
+  }
   try {
     return await response.json();
   } catch {
@@ -93,22 +121,21 @@ async function chatBedrock(config, request) {
 
 async function chatOpenAI(config, request) {
   const schema = request.schemaName === 'pregp_turn' ? turnSchema : summarySchema;
-  const data = await requestJson('https://api.openai.com/v1/chat/completions', {
+  const data = await requestJson('https://api.openai.com/v1/responses', {
     'content-type': 'application/json', authorization: `Bearer ${config.key}`,
   }, {
     model: request.model,
-    messages: request.messages,
-    max_completion_tokens: request.maxTokens,
-    reasoning_effort: 'none',
-    temperature: request.temperature ?? 0.4,
+    input: request.messages,
+    max_output_tokens: request.maxTokens,
+    reasoning: { effort: request.model === 'gpt-6-luna' ? 'none' : 'low' },
     parallel_tool_calls: false,
-    tools: [{ type: 'function', function: { name: request.schemaName, description: toolDescription(), parameters: schema, strict: true } }],
-    tool_choice: { type: 'function', function: { name: request.schemaName } },
+    tools: [{ type: 'function', name: request.schemaName, description: toolDescription(), parameters: schema, strict: true }],
+    tool_choice: { type: 'function', name: request.schemaName },
   }, 'OpenAI');
-  const call = data.choices?.[0]?.message?.tool_calls?.find((item) => item.function?.name === request.schemaName);
-  if (!call?.function?.arguments) throw new Error('OpenAI returned an unexpected structured response.');
+  const call = data.output?.find((item) => item.type === 'function_call' && item.name === request.schemaName);
+  if (!call?.arguments) throw new Error('OpenAI returned an unexpected structured response.');
   try {
-    return { content: JSON.parse(call.function.arguments), model: data.model || request.model };
+    return { content: JSON.parse(call.arguments), model: data.model || request.model };
   } catch {
     throw new Error('OpenAI returned malformed structured data.');
   }
@@ -127,7 +154,7 @@ async function chatClaude(config, request) {
     system: `${system.join('\n\n')}\n\nWhen responding, invoke the ${request.schemaName} tool with the complete structured output. Never answer in plain text.`,
     messages: turns,
     tools: [{ name: request.schemaName, description: toolDescription(), input_schema: schema, strict: true }],
-    tool_choice: { type: 'auto', disable_parallel_tool_use: true },
+    tool_choice: { type: 'tool', name: request.schemaName },
   }, 'Claude');
   if (data.stop_reason === 'max_tokens') throw new Error('The Claude response was cut short. Please try again.');
   const result = data.content?.find((item) => item.type === 'tool_use' && item.name === request.schemaName);
@@ -149,9 +176,12 @@ export function providerModel(provider) {
 
 export function createAiClient(config) {
   if (!config?.key || !providerDefaults[config.provider]) throw new Error('Configure an AI provider first.');
+  const model = config.model || providerModel(config.provider);
+  if (config.model && !providerModelOptions.some((option) => option.provider === config.provider && option.modelId === config.model)) {
+    throw new Error('The selected model does not belong to the configured AI provider.');
+  }
   return {
     async chatJson(request) {
-      const model = providerModel(config.provider);
       const normalized = { ...request, model };
       if (config.provider === 'bedrock') return chatBedrock(config, normalized);
       if (config.provider === 'openai') return chatOpenAI(config, normalized);
