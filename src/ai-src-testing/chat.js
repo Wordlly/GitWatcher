@@ -104,18 +104,19 @@ async function modelCall(session, schemaName, schema, messages, maxTokens, tempe
 }
 
 async function nextTurn(session) {
+  const patientHistory = patientMessages(session.messages).map((message) => message.text).join("\n");
   const latestPatientMessage = patientMessages(session.messages).at(-1)?.text || "";
-  if (latestPatientMessage && detectEmergency(latestPatientMessage)) {
+  if (patientHistory && detectEmergency(patientHistory)) {
     return { text: emergencyTurnText, questionId: null, input: null, phase: "closing", complete: true, emergency: true };
   }
   if (latestPatientMessage && detectAssessmentRequest(latestPatientMessage)) {
     return { text: assessmentRefusalText, questionId: null, input: null, phase: "details", complete: false };
   }
 
-  const patientHistory = patientMessages(session.messages).map((message) => message.text).join("\n");
   const guidance = findClinicalGuidance(patientHistory);
-  const result = await modelCall(session, "pregp_turn", turnSchema,
-    turnMessages(session.profile, session.messages, [], new Date(), guidance), 700, 0.8);
+  const messages = turnMessages(session.profile, session.messages, [], new Date(), guidance);
+  messages[0].content += `\n\nDiscord testing adapter: this interface accepts only typed messages and has no appointment-booking action. Use plain text only. Do not rely on choice, multi-select, scale, date, number, or other widgets; write any answer choices into the question text. Ask whether an appointment is already booked. If it is not booked, record that preference and explain briefly that booking must happen through the patient's usual practice channel; do not claim to book one or promise a booking interface. Once useful history has been gathered, finish the interview.`;
+  const result = await modelCall(session, "pregp_turn", turnSchema, messages, 700, 0.8);
   let turn = parseAssistantTurn(result.content);
   if (containsPatientAssessment(turn.text)) {
     turn = { text: assessmentRefusalText, questionId: null, input: null, phase: "details", complete: false };
@@ -137,7 +138,12 @@ async function sendTurn(session, turn) {
     ...(turn.questionId ? { questionId: turn.questionId } : {}),
     ...(turn.input ? { input: turn.input } : {}), phase: turn.phase,
   });
-  if (!session.stopped) await sendLong(session.channel, `**PreGP · ${session.profile.preferredName}:** ${turn.text}`);
+  if (!session.stopped) {
+    const choices = Array.isArray(turn.input?.options) && turn.input.options.length
+      ? `\n${turn.input.options.map((option) => `• ${typeof option === 'string' ? option : option.label || option.value}`).join('\n')}`
+      : '';
+    await sendLong(session.channel, `**PreGP · ${session.profile.preferredName}:** ${turn.text}${choices}`);
+  }
 }
 
 async function finishSession(session) {
