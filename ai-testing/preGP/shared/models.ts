@@ -45,6 +45,8 @@ export interface ConversationMessage {
   phase?: ConsultationPhase;
   value?: AnswerValue;
   source?: MessageSource;
+  /** Marks the fixed emergency response so later patient-closing logic skips routine advice. */
+  emergency?: boolean;
 }
 export type ConductorKind = 'scripted' | 'ai';
 export type Confidence = 'stated' | 'inferred' | 'uncertain';
@@ -53,28 +55,12 @@ export interface EvidenceRef { source: 'message' | 'profile'; ref: string; quote
 export interface Finding { id: string; label: string; value: string; reasoning: string; confidence: Confidence; evidence: EvidenceRef[] }
 export interface RedFlagCheck { flag: string; status: 'reported' | 'denied' | 'not-discussed'; reasoning: string; evidence: EvidenceRef[] }
 export interface FocusPoint { point: string; reasoning: string; evidence: EvidenceRef[] }
-/** Versioned clinical guidance with an accountable review decision. */
-export interface ClinicalSourceRecord {
-  id: string;
-  title: string;
-  publisher: string;
-  version: string;
-  effectiveDate: string;
-  reviewedBy: string;
-  reviewStatus: 'approved' | 'pending' | 'rejected';
-  excerpt: string;
-}
-/** One clinician-only SOAP section; evidence always points to the patient record. */
-export interface SoapSection { text: string; confidence: Confidence; evidence: EvidenceRef[]; gaps: string[] }
-/** Clinical guidance stays separate from patient transcript and profile citations. */
-export interface SoapHandoff {
-  subjective: SoapSection;
-  objective: SoapSection;
-  assessment: SoapSection;
-  plan: SoapSection;
-  sourceRefs: ClinicalSourceRecord[];
-}
-interface ConsultationSummaryBase {
+/** An evidence-linked clinician consideration; it is never a patient-facing diagnosis. */
+export interface AssessmentConsideration { id: string; statement: string; reasoning: string; confidence: 'uncertain'; evidence: EvidenceRef[] }
+/** Four clinician-facing SOAP sections, kept alongside version 2 fields for record compatibility. */
+export interface SoapSummary { subjective: Finding[]; objective: Finding[]; assessment: AssessmentConsideration[]; plan: FocusPoint[] }
+export interface ConsultationSummary {
+  version: 2;
   source: ConductorKind;
   model?: string;
   generatedAt: string;
@@ -87,16 +73,15 @@ interface ConsultationSummaryBase {
   impact: Finding[];
   suggestedFocus: FocusPoint[];
   gaps: string[];
+  soap: SoapSummary;
 }
-/** Legacy stored summaries remain valid without a SOAP handoff. */
-export type ConsultationSummary = (ConsultationSummaryBase & { version: 2; soap?: never }) | (ConsultationSummaryBase & { version: 3; soap: SoapHandoff });
 /** What the AI gateway can do right now; false everywhere means scripted mode. */
 export interface AiStatus { configured: boolean; speech: boolean; transcribe: boolean; model?: string }
 /** A completed earlier conversation the guide may mention as background. */
 export interface PriorConsultation { title: string; completedAt: string }
 /** One assistant message: what to say, what it asks, how to answer and where the conversation is.
  * The model's private rationale is not part of it; parseAssistantTurn leaves it behind. */
-export interface AssistantTurn { text: string; questionId: string | null; input: InputSpec | null; phase: ConsultationPhase; complete: boolean }
+export interface AssistantTurn { text: string; questionId: string | null; input: InputSpec | null; phase: ConsultationPhase; complete: boolean; emergency?: boolean }
 export interface TurnRequest { profile: PatientProfile; messages: ConversationMessage[]; priorConsultations: PriorConsultation[] }
 export interface SummaryRequest { profile: PatientProfile; messages: ConversationMessage[] }
 export interface VerificationFailure { location: string; reason: string; quote: string }

@@ -39,12 +39,19 @@ export const turnSchema: Record<string, unknown> = {
 
 const evidence = { type: 'array', items: { type: 'object', additionalProperties: false, required: ['source', 'ref', 'quote'], properties: { source: { type: 'string', enum: ['message', 'profile'] }, ref: { type: 'string', description: 'The patient message tag shown in square brackets (e.g. P3), or the profile field name.' }, quote: { type: 'string', description: 'An exact substring of the cited message or profile field.' } } } };
 const finding = { type: 'object', additionalProperties: false, required: ['id', 'label', 'value', 'reasoning', 'confidence', 'evidence'], properties: { id: { type: 'string' }, label: { type: 'string' }, value: { type: 'string' }, reasoning: { type: 'string' }, confidence: { type: 'string', enum: ['stated', 'inferred', 'uncertain'] }, evidence } };
+const focusPoint = { type: 'object', additionalProperties: false, required: ['point', 'reasoning', 'evidence'], properties: { point: { type: 'string' }, reasoning: { type: 'string' }, evidence } };
+const soap = { type: 'object', additionalProperties: false, required: ['subjective', 'objective', 'assessment', 'plan'], properties: {
+  subjective: { type: 'array', items: finding },
+  objective: { type: 'array', items: finding },
+  assessment: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'statement', 'reasoning', 'confidence', 'evidence'], properties: { id: { type: 'string' }, statement: { type: 'string' }, reasoning: { type: 'string' }, confidence: { type: 'string', enum: ['uncertain'] }, evidence } } },
+  plan: { type: 'array', items: focusPoint },
+} };
 
 /** The evidence-linked clinician summary; the gateway adds version, source, model and timestamps. */
 export const summarySchema: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
-  required: ['narrative', 'presentingComplaint', 'history', 'redFlags', 'background', 'impact', 'suggestedFocus', 'gaps'],
+  required: ['narrative', 'presentingComplaint', 'history', 'redFlags', 'background', 'impact', 'suggestedFocus', 'gaps', 'soap'],
   properties: {
     narrative: { type: 'string' },
     presentingComplaint: finding,
@@ -54,5 +61,6 @@ export const summarySchema: Record<string, unknown> = {
     impact: { type: 'array', items: finding },
     suggestedFocus: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['point', 'reasoning', 'evidence'], properties: { point: { type: 'string' }, reasoning: { type: 'string' }, evidence } } },
     gaps: { type: 'array', items: { type: 'string' } },
+    soap,
   },
 };

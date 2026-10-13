@@ -58,5 +58,11 @@ export function relinkCitations(summary: ConsultationSummary, messages: Conversa
     background: summary.background.map(fix),
     impact: summary.impact.map(fix),
     suggestedFocus: summary.suggestedFocus.map(fix),
+    soap: {
+      subjective: summary.soap.subjective.map(fix),
+      objective: summary.soap.objective.map(fix),
+      assessment: summary.soap.assessment.map(fix),
+      plan: summary.soap.plan.map(fix),
+    },
   };
 }

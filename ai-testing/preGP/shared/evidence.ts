@@ -25,6 +25,13 @@ export function evidenceKey(ref: EvidenceRef): string {
 export function citations(summary: ConsultationSummary): Citation[] {
   const result: Citation[] = [];
   const add = (location: string, evidence: EvidenceRef[]) => { for (const ref of evidence) result.push({ location, ref }); };
+  if (summary.soap) {
+    summary.soap.subjective.forEach(item => add(`subjective:${item.id}`, item.evidence));
+    summary.soap.objective.forEach(item => add(`objective:${item.id}`, item.evidence));
+    summary.soap.assessment.forEach(item => add(`assessment:${item.id}`, item.evidence));
+    summary.soap.plan.forEach((point, index) => add(`plan:${index + 1}`, point.evidence));
+    return result;
+  }
   add(`presenting:${summary.presentingComplaint.id}`, summary.presentingComplaint.evidence);
   for (const finding of summary.history) add(`history:${finding.id}`, finding.evidence);
   for (const flag of summary.redFlags) add(`red-flag:${flag.flag}`, flag.evidence);

@@ -13,6 +13,9 @@ import { turnMessages, summaryMessages, repairMessages, promptVersion } from '..
 import { turnSchema, summarySchema } from '../../ai-testing/preGP/backend/schemas.ts';
 import { relinkCitations, resolveCitations, tagTranscript } from '../../ai-testing/preGP/backend/citations.ts';
 import { createAiClient, providerModel, providerModelOptions } from './providers.js';
+import { findClinicalGuidance, detectEmergency } from '../../ai-testing/preGP/shared/clinical-guidance.ts';
+import { assessmentRefusalText, containsPatientAssessment } from '../../ai-testing/preGP/shared/patient-safety.ts';
+import { detectAssessmentRequest, emergencyTurnText } from '../../ai-testing/preGP/backend/patient-safety.ts';
 
 const guildConfigurations = new Map();
 const conversations = new Map();
@@ -54,33 +57,44 @@ function evidenceSuffix(evidence, messages) {
 }
 
 function renderSummary(summary, messages, verification, patientName) {
-  const complaintEvidence = evidenceSuffix(summary.presentingComplaint.evidence, messages);
-  const lines = [`**GP-only preassessment — ${patientName}**`, '', summary.narrative, '', `**Presenting concern:** ${summary.presentingComplaint.value}${complaintEvidence ? `\n_${complaintEvidence}_` : ''}`];
+  const lines = ["**GP-only preassessment — " + patientName + "**", "", summary.narrative];
   const addFindings = (title, entries) => {
-    if (!entries?.length) return;
-    lines.push('', `**${title}**`);
+    lines.push("", "**" + title + "**");
+    if (!entries?.length) {
+      lines.push("• None recorded.");
+      return;
+    }
     for (const entry of entries) {
-      const label = entry.label || entry.id || entry.flag || entry.point || 'Item';
-      const value = entry.value || entry.status || entry.point || '';
+      const label = entry.label || entry.id || "Item";
+      const value = entry.value || "";
       const citations = evidenceSuffix(entry.evidence, messages);
-      lines.push(`• ${label}: ${value}${entry.reasoning ? ` — ${entry.reasoning}` : ''}${citations ? `\n  _${citations}_` : ''}`);
+      lines.push("• " + label + ": " + value + (entry.reasoning ? " — " + entry.reasoning : "") + (citations ? "\n  _" + citations + "_" : ""));
     }
   };
-  addFindings('History', summary.history);
-  addFindings('Red flags', summary.redFlags);
-  addFindings('Background', summary.background);
-  addFindings('Impact', summary.impact);
-  if (summary.suggestedFocus.length) {
-    lines.push('', '**Suggested areas to discuss with the GP**');
-    for (const point of summary.suggestedFocus) {
-      const citations = evidenceSuffix(point.evidence, messages);
-      lines.push(`• ${point.point}${point.reasoning ? ` — ${point.reasoning}` : ''}${citations ? `\n  _${citations}_` : ''}`);
+  addFindings("1. Subjective", summary.soap.subjective);
+  addFindings("2. Objective", summary.soap.objective);
+  lines.push("", "**3. Assessment**");
+  if (!summary.soap.assessment.length) {
+    lines.push("• No assessment considerations were generated.");
+  } else {
+    for (const item of summary.soap.assessment) {
+      const citations = evidenceSuffix(item.evidence, messages);
+      lines.push("• Uncertain consideration: " + item.statement + (item.reasoning ? " — " + item.reasoning : "") + (citations ? "\n  _" + citations + "_" : ""));
     }
   }
-  if (summary.gaps.length) lines.push('', `**Not covered or unclear:** ${summary.gaps.join('; ')}`);
-  lines.push('', `Citations verified: ${verification.verified}/${verification.total}.`);
-  if (verification.failures.length) lines.push(`Unverified citations: ${verification.failures.length}.`);
-  return lines.join('\n');
+  lines.push("", "**4. Plan**");
+  if (!summary.soap.plan.length) {
+    lines.push("• No specific areas suggested.");
+  } else {
+    for (const point of summary.soap.plan) {
+      const citations = evidenceSuffix(point.evidence, messages);
+      lines.push("• " + point.point + (point.reasoning ? " — " + point.reasoning : "") + (citations ? "\n  _" + citations + "_" : ""));
+    }
+  }
+  if (summary.gaps.length) lines.push("", "**Not covered or unclear:** " + summary.gaps.join("; "));
+  lines.push("", "Citations verified: " + verification.verified + "/" + verification.total + ".");
+  if (verification.failures.length) lines.push("Unverified citations: " + verification.failures.length + ".");
+  return lines.join("\n");
 }
 
 async function modelCall(session, schemaName, schema, messages, maxTokens, temperature) {
@@ -90,16 +104,29 @@ async function modelCall(session, schemaName, schema, messages, maxTokens, tempe
 }
 
 async function nextTurn(session) {
-  const result = await modelCall(session, 'pregp_turn', turnSchema,
-    turnMessages(session.profile, session.messages, []), 700, 0.8);
-  const turn = parseAssistantTurn(result.content);
+  const latestPatientMessage = patientMessages(session.messages).at(-1)?.text || "";
+  if (latestPatientMessage && detectEmergency(latestPatientMessage)) {
+    return { text: emergencyTurnText, questionId: null, input: null, phase: "closing", complete: true, emergency: true };
+  }
+  if (latestPatientMessage && detectAssessmentRequest(latestPatientMessage)) {
+    return { text: assessmentRefusalText, questionId: null, input: null, phase: "details", complete: false };
+  }
+
+  const patientHistory = patientMessages(session.messages).map((message) => message.text).join("\n");
+  const guidance = findClinicalGuidance(patientHistory);
+  const result = await modelCall(session, "pregp_turn", turnSchema,
+    turnMessages(session.profile, session.messages, [], new Date(), guidance), 700, 0.8);
+  let turn = parseAssistantTurn(result.content);
+  if (containsPatientAssessment(turn.text)) {
+    turn = { text: assessmentRefusalText, questionId: null, input: null, phase: "details", complete: false };
+  }
   if (!session.messages.length) {
-    const name = session.profile.preferredName || 'there';
-    turn.text = `Kia ora ${name}. What would you like to talk about today? Tell me in your own words.`;
-    turn.questionId = 'concern';
+    const name = session.profile.preferredName || "there";
+    turn.text = "Kia ora " + name + ". What would you like to talk about today? Tell me in your own words.";
+    turn.questionId = "concern";
     turn.complete = false;
-    turn.input = { kind: 'text', placeholder: 'Reply in your own words.' };
-    turn.phase = 'concern';
+    turn.input = { kind: "text", placeholder: "Reply in your own words." };
+    turn.phase = "concern";
   }
   return turn;
 }

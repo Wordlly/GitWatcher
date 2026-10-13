@@ -5,7 +5,7 @@
 import type { AssistantTurn, ConsultationSummary, InputSpec, PatientProfile, QuestionOption } from './models.ts';
 import { addressName } from './person.ts';
 import { sentencesOf } from './text.ts';
-import { isRecord, validInputSpec, validSoapHandoff, validSummary } from './validation.ts';
+import { validInputSpec, validSummary } from './validation.ts';
 
 const phases = ['opening', 'concern', 'details', 'history', 'impact', 'closing'];
 export const unexpectedResponse = 'The assistant returned an unexpected response. Please try again.';
@@ -65,7 +65,7 @@ export function parseAssistantTurn(value: unknown): AssistantTurn {
   const questionId = typeof turn.questionId === 'string' && turn.questionId.trim() ? turn.questionId.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : null;
   // A question without a widget is still a question: default to free text so the reply is recorded against it.
   const input = turn.complete ? null : normaliseInput(turn.input) ?? (questionId ? { kind: 'text' } : null);
-  return { text: turn.text.trim(), questionId: questionId || null, input, phase: turn.complete ? 'closing' : phase, complete: turn.complete };
+  return { text: turn.text.trim(), questionId: questionId || null, input, phase: turn.complete ? 'closing' : phase, complete: turn.complete, ...(turn.emergency === true ? { emergency: true } : {}) };
 }
 
 /** Force the first turn of a conversation to ask for today's concern as free text.
@@ -86,22 +86,41 @@ export function ensureOpeningQuestion(turn: AssistantTurn, profile: PatientProfi
 const summaryLists = ['history', 'redFlags', 'background', 'impact', 'suggestedFocus', 'gaps'] as const;
 const evidenceLists = ['history', 'redFlags', 'background', 'impact', 'suggestedFocus'] as const;
 
-/** Only an absent legacy list means empty; explicit null and version 3 omissions are invalid. */
+/** An omitted list means an empty one: a constrained decoder (Nova) leaves out a required list it has nothing to fill. */
 function fillLists(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const summary = { ...(value as Record<string, unknown>) };
-  if (summary.version !== 2) return summary;
-  for (const key of summaryLists) if (!(key in summary)) summary[key] = [];
+  for (const key of summaryLists) summary[key] ??= [];
   const withEvidence = (item: unknown) => item && typeof item === 'object' && !Array.isArray(item) ? { evidence: [], ...(item as Record<string, unknown>) } : item;
   summary.presentingComplaint = withEvidence(summary.presentingComplaint);
   for (const key of evidenceLists) if (Array.isArray(summary[key])) summary[key] = summary[key].map(withEvidence);
+  const legacyMeasurements = Array.isArray(summary.history) ? summary.history.filter(item => item && typeof item === 'object' && /^(?:temp|temperature|measured temperature)$/i.test(String((item as Record<string, unknown>).label ?? (item as Record<string, unknown>).id))) : [];
+  const legacySubjectiveHistory = Array.isArray(summary.history) ? summary.history.filter(item => !legacyMeasurements.includes(item)) : [];
+  const legacySafety = Array.isArray(summary.redFlags) ? summary.redFlags.filter(item => item && typeof item === 'object').map(item => {
+    const flag = item as Record<string, unknown>;
+    const status = flag.status === 'reported' ? 'Reported' : flag.status === 'denied' ? 'Denied' : 'Not discussed';
+    const id = String(flag.flag ?? 'safety').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return { id: `safety_${id}`, label: String(flag.flag ?? 'Safety area'), value: status, reasoning: String(flag.reasoning ?? ''), confidence: flag.status === 'not-discussed' ? 'uncertain' : 'stated', evidence: Array.isArray(flag.evidence) ? flag.evidence : [] };
+  }) : [];
+  if (!summary.soap || typeof summary.soap !== 'object' || Array.isArray(summary.soap)) {
+    summary.soap = { subjective: [summary.presentingComplaint, ...legacySubjectiveHistory, ...(summary.background as unknown[]), ...(summary.impact as unknown[]), ...legacySafety], objective: legacyMeasurements, assessment: [], plan: summary.suggestedFocus };
+  } else {
+    const soap = summary.soap as Record<string, unknown>;
+    soap.subjective ??= [summary.presentingComplaint, ...legacySubjectiveHistory, ...(summary.background as unknown[]), ...(summary.impact as unknown[]), ...legacySafety];
+    soap.objective ??= legacyMeasurements;
+    soap.assessment ??= [];
+    soap.plan ??= summary.suggestedFocus;
+    if (Array.isArray(soap.subjective)) soap.subjective = soap.subjective.map(withEvidence);
+    if (Array.isArray(soap.objective)) soap.objective = soap.objective.map(withEvidence);
+    if (Array.isArray(soap.assessment)) soap.assessment = soap.assessment.map(withEvidence);
+    if (Array.isArray(soap.plan)) soap.plan = soap.plan.map(withEvidence);
+  }
   return summary;
 }
 
 /** Validate a summary from the model or the gateway; throws a readable error when unusable. */
 export function parseSummary(value: unknown): ConsultationSummary {
-  if (isRecord(value) && ((value.version === 2 && 'soap' in value) || (value.version === 3 && !validSoapHandoff(value.soap)))) throw new Error(unexpectedResponse);
-  const summary = stripNulls(fillLists(value));
+  const summary = fillLists(stripNulls(value));
   if (!validSummary(summary)) throw new Error(unexpectedResponse);
   return summary;
 }
